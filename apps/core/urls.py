@@ -1,6 +1,8 @@
-from django.urls import path
+"""Core app URL Configuration."""
 
-app_name = 'core'
+# from django.urls import path
+
+app_name = "core"
 
 urlpatterns = [
     # Add URL patterns here
