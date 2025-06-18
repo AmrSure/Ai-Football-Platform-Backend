@@ -11,6 +11,7 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from drf_yasg import openapi
+from drf_yasg.generators import OpenAPISchemaGenerator
 from drf_yasg.views import get_schema_view
 from rest_framework import permissions
 
@@ -19,13 +20,49 @@ schema_view = get_schema_view(
     openapi.Info(
         title="AI Football Platform API",
         default_version="v1",
-        description="",
+        description="""
+        # AI Football Platform API Documentation
+
+        This API provides endpoints for managing football academies, players, coaches, matches, analytics, and more.
+
+        ## Authentication
+
+        The API uses JWT (JSON Web Token) authentication. To authenticate:
+
+        1. Obtain a token pair by sending a POST request to `/api/v1/auth/login/` with your username and password
+        2. Include the access token in the Authorization header of your requests: `Authorization: Bearer <token>`
+        3. When the access token expires, use the refresh token to get a new one via `/api/v1/auth/refresh/`
+
+        ## User Types
+
+        The platform supports different user types with different permissions:
+
+        - **System Admin**: Full access to all features
+        - **Academy Admin**: Can manage their academy, coaches, players, and parents
+        - **Coach**: Can manage their assigned players and matches
+        - **Player**: Can view their profile, matches, and analytics
+        - **Parent**: Can view their children's profiles, matches, and analytics
+        - **External Client**: Can book facilities and services
+
+        ## API Structure
+
+        - `/api/v1/auth/`: Authentication endpoints
+        - `/api/v1/academy-users/`: Academy user management (for academy admins)
+        - `/api/v1/academies/`: Academy management
+        - `/api/v1/players/`: Player management
+        - `/api/v1/matches/`: Match management
+        - `/api/v1/bookings/`: Facility booking
+        - `/api/v1/analytics/`: Performance analytics
+        - `/api/v1/notifications/`: User notifications
+        """,
         terms_of_service="https://www.example.com/terms/",
         contact=openapi.Contact(email="contact@example.com"),
         license=openapi.License(name="MIT License"),
     ),
     public=True,
     permission_classes=(permissions.AllowAny,),
+    validators=["flex", "ssv"],
+    generator_class=OpenAPISchemaGenerator,
 )
 
 # Base URL patterns (non-internationalized)

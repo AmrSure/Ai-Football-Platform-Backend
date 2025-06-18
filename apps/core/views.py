@@ -29,17 +29,33 @@ class BaseModelViewSet(viewsets.ModelViewSet):
     """
 
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    ordering = ["-created_at"]
+    # Default ordering will be set in get_queryset based on available fields
 
     def get_queryset(self):
         """
         Override to filter out inactive objects by default.
 
         Only returns objects where is_active=True if the model has that field.
+        Also sets appropriate ordering based on available date fields.
         """
         queryset = super().get_queryset()
-        if hasattr(queryset.model, "is_active"):
+
+        # Apply default ordering based on available fields
+        model = queryset.model
+        if not self.ordering:
+            if hasattr(model, "created_at"):
+                queryset = queryset.order_by("-created_at")
+            elif hasattr(model, "date_joined"):
+                queryset = queryset.order_by("-date_joined")
+            elif hasattr(model, "date_created"):
+                queryset = queryset.order_by("-date_created")
+            elif hasattr(model, "updated_at"):
+                queryset = queryset.order_by("-updated_at")
+
+        # Filter by active status if applicable
+        if hasattr(model, "is_active"):
             queryset = queryset.filter(is_active=True)
+
         return queryset
 
     def perform_create(self, serializer):

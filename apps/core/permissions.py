@@ -58,6 +58,58 @@ class IsAcademyAdmin(permissions.BasePermission):
         )
 
 
+class IsAcademyAdminForUser(permissions.BasePermission):
+    """Permission for academy admins to manage users in their academy."""
+
+    def has_permission(self, request, view):
+        """
+        Check if user is an academy admin.
+
+        Returns:
+            bool: True if user is authenticated and an academy admin
+        """
+        return (
+            request.user.is_authenticated and request.user.user_type == "academy_admin"
+        )
+
+    def has_object_permission(self, request, view, obj):
+        """
+        Check if the target user belongs to the academy admin's academy.
+
+        Args:
+            request: The request object
+            view: The view being accessed
+            obj: The user object being accessed
+
+        Returns:
+            bool: True if the target user belongs to the academy admin's academy
+        """
+        # Allow access to safe methods for all academy admins
+        if request.method in permissions.SAFE_METHODS:
+            return True
+
+        # Only allow editing/deleting users that belong to the admin's academy
+        if not hasattr(request.user, "profile") or not hasattr(obj, "profile"):
+            return False
+
+        # Check if the user being accessed is a coach, player, or parent
+        if obj.user_type not in ["coach", "player", "parent"]:
+            return False
+
+        # Get the admin's academy
+        admin_profile = request.user.profile
+        if not hasattr(admin_profile, "academy"):
+            return False
+
+        # Get the target user's academy
+        user_profile = obj.profile
+        if not hasattr(user_profile, "academy"):
+            return False
+
+        # Check if they belong to the same academy
+        return admin_profile.academy == user_profile.academy
+
+
 class IsCoach(permissions.BasePermission):
     """Permission for coaches."""
 

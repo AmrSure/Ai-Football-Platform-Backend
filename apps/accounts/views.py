@@ -1,0 +1,711 @@
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.db.models import Q
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
+from rest_framework import generics, mixins, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+from apps.core.permissions import IsAcademyAdmin, IsAcademyAdminForUser, IsSystemAdmin
+from apps.core.serializers import BaseUserSerializer
+from apps.core.views import BaseModelViewSet
+
+from .serializers import (
+    AcademyUserRegistrationSerializer,
+    AcademyUserUpdateSerializer,
+    ChangePasswordSerializer,
+    CustomTokenObtainPairSerializer,
+    ProfileSerializer,
+    UserRegistrationSerializer,
+)
+
+User = get_user_model()
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """
+    Takes a set of user credentials and returns an access and refresh JSON web token pair.
+
+    This custom implementation may provide additional data in the response.
+    """
+
+    serializer_class = CustomTokenObtainPairSerializer
+
+
+class RegisterView(generics.CreateAPIView):
+    """
+    API endpoint for external client self-registration.
+
+    Only allows registration with user_type='external_client'.
+    Other user types must be registered by an academy admin.
+
+    Required fields:
+    - username: Unique username for the account
+    - email: Valid email address
+    - password: Password meeting complexity requirements
+    - password_confirm: Must match password
+    - first_name: User's first name
+    - last_name: User's last name
+    - user_type: Must be 'external_client'
+
+    Optional fields:
+    - phone: Contact phone number
+    """
+
+    queryset = User.objects.all()
+    serializer_class = UserRegistrationSerializer
+    permission_classes = [AllowAny]
+
+    @swagger_auto_schema(
+        operation_summary="Register a new external client user",
+        operation_description="Creates a new user account with user_type='external_client'",
+        responses={
+            201: openapi.Response(
+                description="User created successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "username": openapi.Schema(type=openapi.TYPE_STRING),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING),
+                        "first_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "last_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "user_type": openapi.Schema(type=openapi.TYPE_STRING),
+                        "phone": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: "Bad request - validation errors",
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        return super().post(request, *args, **kwargs)
+
+
+class AcademyUserRegistrationView(generics.CreateAPIView):
+    """
+    API endpoint for academy admins to register coaches, players, and parents.
+
+    Only academy admins can access this endpoint. Only allows registration of users with
+    user_type in ['coach', 'player', 'parent'].
+
+    Required fields:
+    - username: Unique username for the account
+    - email: Valid email address
+    - password: Password meeting complexity requirements
+    - user_type: One of 'coach', 'player', or 'parent'
+    - academy_id: ID of the academy to associate the user with
+
+    Optional fields:
+    - first_name: User's first name
+    - last_name: User's last name
+    - phone: Contact phone number
+    """
+
+    queryset = User.objects.all()
+    serializer_class = AcademyUserRegistrationSerializer
+    permission_classes = [IsAuthenticated, IsAcademyAdmin]
+
+    @swagger_auto_schema(
+        operation_summary="Register a new academy user",
+        operation_description="Creates a new user account with user_type in ['coach', 'player', 'parent']",
+        responses={
+            201: openapi.Response(
+                description="User created successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "username": openapi.Schema(type=openapi.TYPE_STRING),
+                        "email": openapi.Schema(type=openapi.TYPE_STRING),
+                        "first_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "last_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "user_type": openapi.Schema(type=openapi.TYPE_STRING),
+                        "phone": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not an academy admin",
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        return super().post(request, *args, **kwargs)
+
+
+class LogoutView(generics.GenericAPIView):
+    """
+    API endpoint for user logout.
+
+    Blacklists the provided refresh token to prevent further use.
+    Requires authentication.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_summary="Logout user",
+        operation_description="Blacklists the refresh token to prevent further use",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["refresh"],
+            properties={
+                "refresh": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="JWT refresh token"
+                )
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Successfully logged out",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "message": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Success message"
+                        )
+                    },
+                ),
+            ),
+            400: "Bad request - invalid token",
+            401: "Unauthorized - authentication required",
+        },
+    )
+    def post(self, request):
+        try:
+            refresh_token = request.data["refresh"]
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response(
+                {"message": "Successfully logged out"}, status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            print(e)
+            return Response(
+                {"error": "Invalid token"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class ProfileView(generics.RetrieveUpdateAPIView):
+    """
+    API endpoint for retrieving and updating the current user's profile.
+
+    GET: Returns the user's profile data
+    PUT/PATCH: Updates the user's profile data
+
+    The profile model returned depends on the user's type (coach, player, parent, etc.)
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user.profile
+
+    def get_serializer_class(self):
+        return ProfileSerializer
+
+    @swagger_auto_schema(
+        operation_summary="Get current user's profile",
+        operation_description="Returns the profile data for the authenticated user",
+        responses={
+            200: "User profile data",
+            401: "Unauthorized - authentication required",
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Update current user's profile",
+        operation_description="Updates the profile data for the authenticated user",
+        responses={
+            200: "Updated profile data",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+        },
+    )
+    def put(self, request, *args, **kwargs):
+        return super().put(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Partially update current user's profile",
+        operation_description="Partially updates the profile data for the authenticated user",
+        responses={
+            200: "Updated profile data",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+        },
+    )
+    def patch(self, request, *args, **kwargs):
+        return super().patch(request, *args, **kwargs)
+
+
+class ChangePasswordView(generics.UpdateAPIView):
+    """
+    API endpoint for changing the current user's password.
+
+    Requires the old password for verification and a new password that meets
+    complexity requirements.
+    """
+
+    serializer_class = ChangePasswordSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        return self.request.user
+
+    @swagger_auto_schema(
+        operation_summary="Change user password",
+        operation_description="Changes the password for the authenticated user",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["old_password", "new_password", "new_password_confirm"],
+            properties={
+                "old_password": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="Current password"
+                ),
+                "new_password": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="New password"
+                ),
+                "new_password_confirm": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="Confirmation of new password"
+                ),
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Password updated successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "message": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Success message"
+                        )
+                    },
+                ),
+            ),
+            400: "Bad request - validation errors or wrong password",
+            401: "Unauthorized - authentication required",
+        },
+    )
+    def update(self, request, *args, **kwargs):
+        user = self.get_object()
+        serializer = self.get_serializer(data=request.data)
+
+        if serializer.is_valid():
+            # Check old password
+            if not user.check_password(serializer.data.get("old_password")):
+                return Response(
+                    {"old_password": "Wrong password."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Set new password
+            user.set_password(serializer.data.get("new_password"))
+            user.save()
+
+            return Response(
+                {"message": "Password updated successfully"}, status=status.HTTP_200_OK
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserViewSet(BaseModelViewSet):
+    """
+    API endpoints for system administrators to manage all users in the system.
+
+    list: Returns a paginated list of all users
+    retrieve: Returns details of a specific user
+    create: Creates a new user
+    update: Updates a user's data
+    partial_update: Partially updates a user's data
+    destroy: Deletes a user
+
+    Only system administrators can create, update, or delete users through this endpoint.
+    """
+
+    queryset = User.objects.all()
+    serializer_class = BaseUserSerializer
+    permission_classes = [IsAuthenticated]
+    search_fields = ["username", "email", "first_name", "last_name"]
+    filterset_fields = ["user_type", "is_active"]
+    ordering = ["-date_joined"]
+
+    def get_permissions(self):
+        if self.action in ["create", "update", "partial_update", "destroy"]:
+            self.permission_classes = [IsSystemAdmin]
+        return super().get_permissions()
+
+    @swagger_auto_schema(
+        operation_summary="List all users",
+        operation_description="Returns a paginated list of all users in the system",
+        responses={200: "List of users", 401: "Unauthorized - authentication required"},
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Retrieve a specific user",
+        operation_description="Returns details of a specific user by ID",
+        responses={
+            200: "User details",
+            401: "Unauthorized - authentication required",
+            404: "Not found - user does not exist",
+        },
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Create a new user",
+        operation_description="Creates a new user (system admin only)",
+        responses={
+            201: "Created user details",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not a system admin",
+        },
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Update a user",
+        operation_description="Updates a user's data (system admin only)",
+        responses={
+            200: "Updated user details",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not a system admin",
+            404: "Not found - user does not exist",
+        },
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Partially update a user",
+        operation_description="Partially updates a user's data (system admin only)",
+        responses={
+            200: "Updated user details",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not a system admin",
+            404: "Not found - user does not exist",
+        },
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Delete a user",
+        operation_description="Deletes a user (system admin only)",
+        responses={
+            204: "No content - user deleted successfully",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not a system admin",
+            404: "Not found - user does not exist",
+        },
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Activate a user",
+        operation_description="Sets a user's is_active flag to True (system admin only)",
+        responses={
+            200: openapi.Response(
+                description="User activated successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Status message"
+                        )
+                    },
+                ),
+            ),
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not a system admin",
+            404: "Not found - user does not exist",
+        },
+    )
+    @action(detail=True, methods=["post"])
+    def activate(self, request, pk=None):
+        user = self.get_object()
+        user.is_active = True
+        user.save()
+        return Response({"status": "User activated"})
+
+    @swagger_auto_schema(
+        operation_summary="Deactivate a user",
+        operation_description="Sets a user's is_active flag to False (system admin only)",
+        responses={
+            200: openapi.Response(
+                description="User deactivated successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Status message"
+                        )
+                    },
+                ),
+            ),
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not a system admin",
+            404: "Not found - user does not exist",
+        },
+    )
+    @action(detail=True, methods=["post"])
+    def deactivate(self, request, pk=None):
+        user = self.get_object()
+        user.is_active = False
+        user.save()
+        return Response({"status": "User deactivated"})
+
+
+class AcademyUserViewSet(BaseModelViewSet):
+    """
+    API endpoints for academy administrators to manage users in their academy.
+
+    Allows academy admins to list, create, update, and delete coach, player, and parent users
+    that belong to their academy.
+
+    list: Returns a paginated list of users in the admin's academy
+    retrieve: Returns details of a specific user in the admin's academy
+    update: Updates a user's data
+    partial_update: Partially updates a user's data
+    destroy: Deletes a user from the academy
+    activate: Sets a user's is_active flag to True
+    deactivate: Sets a user's is_active flag to False
+    reset_password: Resets a user's password
+
+    Only academy administrators can access these endpoints, and they can only
+    manage users that belong to their own academy.
+    """
+
+    permission_classes = [IsAuthenticated, IsAcademyAdmin]
+    search_fields = ["username", "email", "first_name", "last_name"]
+    filterset_fields = ["user_type", "is_active"]
+    ordering = ["-date_joined"]
+
+    def get_serializer_class(self):
+        """
+        Return appropriate serializer based on action.
+        """
+        if self.action in ["update", "partial_update"]:
+            return AcademyUserUpdateSerializer
+        return BaseUserSerializer
+
+    def get_queryset(self):
+        """
+        Return only users that belong to the admin's academy.
+        """
+        if not hasattr(self.request.user, "profile") or not hasattr(
+            self.request.user.profile, "academy"
+        ):
+            return User.objects.none()
+
+        academy = self.request.user.profile.academy
+
+        # Get all users with profiles in this academy
+        # This query finds users who have a profile (coach, player, parent) in the admin's academy
+        return User.objects.filter(
+            Q(user_type__in=["coach", "player", "parent"]),
+            Q(profile__coach__academy=academy)
+            | Q(profile__player__academy=academy)
+            | Q(profile__parent__academy=academy),
+        ).distinct()
+
+    def get_permissions(self):
+        """
+        Use IsAcademyAdminForUser permission for object-level actions.
+        """
+        if self.action in ["retrieve", "update", "partial_update", "destroy"]:
+            self.permission_classes = [IsAuthenticated, IsAcademyAdminForUser]
+        return super().get_permissions()
+
+    @swagger_auto_schema(
+        operation_summary="List academy users",
+        operation_description="Returns a paginated list of users in the admin's academy",
+        responses={
+            200: "List of users",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not an academy admin",
+        },
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Retrieve an academy user",
+        operation_description="Returns details of a specific user in the admin's academy",
+        responses={
+            200: "User details",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not in admin's academy",
+            404: "Not found - user does not exist",
+        },
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Update an academy user",
+        operation_description="Updates a user's data in the admin's academy",
+        responses={
+            200: "Updated user details",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not in admin's academy",
+            404: "Not found - user does not exist",
+        },
+    )
+    def update(self, request, *args, **kwargs):
+        return super().update(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Partially update an academy user",
+        operation_description="Partially updates a user's data in the admin's academy",
+        responses={
+            200: "Updated user details",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not in admin's academy",
+            404: "Not found - user does not exist",
+        },
+    )
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Delete an academy user",
+        operation_description="Deletes a user from the admin's academy",
+        responses={
+            204: "No content - user deleted successfully",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not in admin's academy",
+            404: "Not found - user does not exist",
+        },
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Activate an academy user",
+        operation_description="Sets a user's is_active flag to True",
+        responses={
+            200: openapi.Response(
+                description="User activated successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Status message"
+                        )
+                    },
+                ),
+            ),
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not in admin's academy",
+            404: "Not found - user does not exist",
+        },
+    )
+    @action(detail=True, methods=["post"])
+    def activate(self, request, pk=None):
+        """
+        Activate a user in the admin's academy.
+        """
+        user = self.get_object()
+        user.is_active = True
+        user.save()
+        return Response({"status": "User activated"})
+
+    @swagger_auto_schema(
+        operation_summary="Deactivate an academy user",
+        operation_description="Sets a user's is_active flag to False",
+        responses={
+            200: openapi.Response(
+                description="User deactivated successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Status message"
+                        )
+                    },
+                ),
+            ),
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not in admin's academy",
+            404: "Not found - user does not exist",
+        },
+    )
+    @action(detail=True, methods=["post"])
+    def deactivate(self, request, pk=None):
+        """
+        Deactivate a user in the admin's academy.
+        """
+        user = self.get_object()
+        user.is_active = False
+        user.save()
+        return Response({"status": "User deactivated"})
+
+    @swagger_auto_schema(
+        operation_summary="Reset an academy user's password",
+        operation_description="Resets the password for a user in the admin's academy",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["new_password"],
+            properties={
+                "new_password": openapi.Schema(
+                    type=openapi.TYPE_STRING, description="New password"
+                )
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Password reset successful",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Status message"
+                        )
+                    },
+                ),
+            ),
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not in admin's academy",
+            404: "Not found - user does not exist",
+        },
+    )
+    @action(detail=True, methods=["post"])
+    def reset_password(self, request, pk=None):
+        """
+        Reset password for a user in the admin's academy.
+        """
+        user = self.get_object()
+        new_password = request.data.get("new_password")
+
+        if not new_password:
+            return Response(
+                {"error": "New password is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            validate_password(new_password, user)
+            user.set_password(new_password)
+            user.save()
+            return Response({"status": "Password reset successful"})
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
