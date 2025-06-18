@@ -60,9 +60,12 @@ cover/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+
 # Django migrations
-*/migrations/*.py
-!*/migrations/__init__.py
+# Ignore all migration files except __init__.py
+**/migrations/**
+!**/migrations/
+!**/migrations/__init__.py
 
 # Flask stuff:
 instance/
@@ -198,3 +201,8 @@ cython_debug/
 
 # Project specific
 Progress.md
+apps/bookings/migrations/__init__.py
+apps/academies/migrations/__init__.py
+apps/core/migrations/__init__.py
+apps/matches/migrations/__init__.py
+apps/players/migrations/__init__.py

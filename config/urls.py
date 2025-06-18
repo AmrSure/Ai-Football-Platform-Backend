@@ -28,9 +28,8 @@ schema_view = get_schema_view(
     permission_classes=(permissions.AllowAny,),
 )
 
+# Base URL patterns (non-internationalized)
 urlpatterns = [
-    # Admin
-    path("admin/", admin.site.urls),
     # API URLs
     path("api/v1/", include("apps.accounts.urls")),
     path("api/v1/", include("apps.academies.urls")),
@@ -54,8 +53,9 @@ urlpatterns = [
     ),
 ]
 
-# Add i18n patterns for admin
+# Add internationalized patterns, including admin
 urlpatterns += i18n_patterns(
+    # Admin site with i18n support
     path("admin/", admin.site.urls),
     prefix_default_language=False,
 )

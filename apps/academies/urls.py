@@ -1,6 +1,6 @@
 from django.urls import path
 
-app_name = 'academies'
+app_name = "academies"
 
 urlpatterns = [
     # Add URL patterns here
