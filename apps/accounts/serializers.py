@@ -10,6 +10,12 @@ from apps.academies.models import (
     ParentProfile,
     PlayerProfile,
 )
+from apps.academies.serializers import (
+    AcademyAdminProfileNestedSerializer,
+    CoachProfileNestedSerializer,
+    ParentProfileNestedSerializer,
+    PlayerProfileNestedSerializer,
+)
 from apps.core.serializers import BaseUserSerializer
 
 User = get_user_model()
@@ -19,8 +25,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
     Custom JWT token serializer that extends the default TokenObtainPairSerializer.
 
-    Adds additional user information to the token response, such as user type,
-    name, and other relevant data.
+    Adds additional user information and profile data to the token response,
+    using appropriate nested serializers based on user type.
 
     Fields:
     - email: User's email for authentication
@@ -34,6 +40,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     - user_type: Type of the authenticated user (system_admin, academy_admin, coach, etc.)
     - first_name: First name of the authenticated user
     - last_name: Last name of the authenticated user
+    - profile: Complete profile information using appropriate nested serializer
     """
 
     def validate(self, attrs):
@@ -42,6 +49,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         # Add custom claims
         user = self.user
+
+        # Get profile data using appropriate serializer
+        profile_data = self._get_profile_data(user)
+
         data.update(
             {
                 "user_id": user.id,
@@ -49,10 +60,62 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 "user_type": user.user_type,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
+                "profile": profile_data,
             }
         )
 
         return data
+
+    def _get_profile_data(self, user):
+        """
+        Get profile data using appropriate nested serializer based on user type.
+        """
+        try:
+            if not hasattr(user, "profile") or not user.profile:
+                return None
+
+            profile = user.profile
+
+            # Map user types to their respective nested serializers
+            profile_serializers = {
+                "parent": ParentProfileNestedSerializer,
+                "player": PlayerProfileNestedSerializer,
+                "coach": CoachProfileNestedSerializer,
+                "academy_admin": AcademyAdminProfileNestedSerializer,
+            }
+
+            # Get the appropriate serializer for the user type
+            serializer_class = profile_serializers.get(user.user_type)
+
+            if serializer_class:
+                serializer = serializer_class(profile)
+                return serializer.data
+            else:
+                # For user types without specific nested serializers (like external_client, system_admin)
+                # Return basic profile information
+                return {
+                    "id": profile.id,
+                    "user": {
+                        "id": user.id,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "full_name": user.get_full_name(),
+                        "user_type": user.user_type,
+                    },
+                    "bio": getattr(profile, "bio", ""),
+                    "date_of_birth": getattr(profile, "date_of_birth", None),
+                    "is_active": getattr(profile, "is_active", True),
+                    "created_at": getattr(profile, "created_at", None),
+                }
+
+        except Exception as e:
+            # Log the error but don't fail authentication
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error getting profile data for user {user.id}: {str(e)}")
+            return None
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):

@@ -32,10 +32,11 @@ logger = logging.getLogger(__name__)
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
-    Email-based JWT Token Authentication Endpoint.
+    Email-based JWT Token Authentication Endpoint with Profile Information.
 
     Takes user email and password and returns an access and refresh JSON web token pair
-    along with additional user information.
+    along with comprehensive user information including profile data using appropriate
+    nested serializers based on user type.
 
     **Authentication Method**: Email + Password
 
@@ -47,23 +48,59 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     }
     ```
 
-    **Response Format**:
+    **Response Format for Parent User**:
     ```json
     {
       "access": "jwt_access_token",
       "refresh": "jwt_refresh_token",
       "user_id": 1,
-      "email": "user@example.com",
-      "user_type": "player",
+      "email": "parent@example.com",
+      "user_type": "parent",
       "first_name": "John",
-      "last_name": "Doe"
+      "last_name": "Doe",
+      "profile": {
+        "id": 1,
+        "user": {
+          "id": 1,
+          "email": "parent@example.com",
+          "first_name": "John",
+          "last_name": "Doe"
+        },
+        "relationship": "father",
+        "bio": "Parent bio information",
+        "date_of_birth": "1980-01-01",
+        "children": [
+          {
+            "id": 2,
+            "user": {
+              "id": 2,
+              "email": "child@example.com",
+              "first_name": "Jane",
+              "last_name": "Doe"
+            },
+            "jersey_number": "10",
+            "position": "midfielder"
+          }
+        ],
+        "is_active": true,
+        "created_at": "2024-01-01T00:00:00Z"
+      }
     }
     ```
 
+    **Profile Serializers by User Type**:
+    - **parent**: Uses `ParentProfileNestedSerializer` with children information
+    - **player**: Uses `PlayerProfileNestedSerializer` with parents and teams
+    - **coach**: Uses `CoachProfileNestedSerializer` with specialization details
+    - **academy_admin**: Uses `AcademyAdminProfileNestedSerializer`
+    - **external_client/system_admin**: Basic profile information
+
     **Features**:
     - Email-based authentication (case-insensitive)
-    - Returns extended user information in token response
+    - Returns extended user information and complete profile data
+    - Uses appropriate nested serializers based on user type
     - Compatible with standard JWT token refresh flow
+    - Safe error handling - authentication won't fail if profile data is unavailable
     """
 
     serializer_class = CustomTokenObtainPairSerializer
