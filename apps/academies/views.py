@@ -187,8 +187,14 @@ class AcademyViewSet(BaseModelViewSet):
                                     "position": openapi.Schema(
                                         type=openapi.TYPE_STRING
                                     ),
-                                    "parents": openapi.Schema(type=openapi.TYPE_ARRAY),
-                                    "teams": openapi.Schema(type=openapi.TYPE_ARRAY),
+                                    "parents": openapi.Schema(
+                                        type=openapi.TYPE_ARRAY,
+                                        items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                                    ),
+                                    "teams": openapi.Schema(
+                                        type=openapi.TYPE_ARRAY,
+                                        items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                                    ),
                                 },
                             ),
                         ),
@@ -203,7 +209,10 @@ class AcademyViewSet(BaseModelViewSet):
                                         type=openapi.TYPE_STRING
                                     ),
                                     "coach": openapi.Schema(type=openapi.TYPE_OBJECT),
-                                    "players": openapi.Schema(type=openapi.TYPE_ARRAY),
+                                    "players": openapi.Schema(
+                                        type=openapi.TYPE_ARRAY,
+                                        items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                                    ),
                                     "total_players": openapi.Schema(
                                         type=openapi.TYPE_INTEGER
                                     ),
@@ -224,7 +233,8 @@ class AcademyViewSet(BaseModelViewSet):
                                         type=openapi.TYPE_INTEGER
                                     ),
                                     "upcoming_bookings": openapi.Schema(
-                                        type=openapi.TYPE_ARRAY
+                                        type=openapi.TYPE_ARRAY,
+                                        items=openapi.Schema(type=openapi.TYPE_OBJECT),
                                     ),
                                 },
                             ),

@@ -14,10 +14,11 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from apps.academies.models import CoachProfile, ParentProfile, PlayerProfile
 from apps.core.permissions import IsAcademyAdmin, IsSystemAdmin
 from apps.core.views import AcademyScopedViewSet
 
-from .models import CoachProfile, ParentProfile, PlayerProfile, Team
+from .models import Team
 from .serializers import (
     CoachProfileSerializer,
     ParentProfileSerializer,

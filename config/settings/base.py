@@ -270,3 +270,20 @@ LOGGING = {
         },
     },
 }
+
+# Email settings using environment variables
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = env("EMAIL_HOST", default="sandbox.smtp.mailtrap.io")
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_PORT = env("EMAIL_PORT", default=2525)
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL",
+    default="AI Football Platform <noreply@aifootballplatform.com>",
+)
+
+# Optional frontend and admin URLs for email templates
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:3000")
+ADMIN_URL = env("ADMIN_URL", default="http://localhost:8000/admin")

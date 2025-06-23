@@ -1,14 +1,14 @@
 """Bookings views module for the AI Football Platform.
 
 This module contains views for managing fields, bookings, and booking-related
-operations with atomic transaction support.
+operations with atomic transaction support and email notifications.
 """
 
 import logging
 from datetime import datetime, timedelta
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Avg, Count, Q, Sum
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import serializers, status, viewsets
@@ -20,7 +20,17 @@ from apps.core.permissions import IsAcademyAdmin, IsSystemAdmin
 from apps.core.views import AcademyScopedViewSet, BaseModelViewSet
 
 from .models import Field, FieldBooking
-from .serializers import FieldBookingSerializer, FieldSerializer
+from .serializers import (
+    BookingAvailabilitySerializer,
+    BookingStatisticsSerializer,
+    FieldBookingSerializer,
+    FieldSerializer,
+)
+from .utils import (
+    BookingConflictChecker,
+    BookingEmailService,
+    BookingStatisticsCalculator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +243,159 @@ class FieldViewSet(AcademyScopedViewSet):
         )
         return Response(response_data)
 
+    @swagger_auto_schema(
+        operation_summary="Get field utilization statistics",
+        operation_description="Get utilization statistics for a specific field",
+        manual_parameters=[
+            openapi.Parameter(
+                "start_date",
+                openapi.IN_QUERY,
+                description="Start date for statistics (YYYY-MM-DD)",
+                type=openapi.TYPE_STRING,
+                required=False,
+            ),
+            openapi.Parameter(
+                "end_date",
+                openapi.IN_QUERY,
+                description="End date for statistics (YYYY-MM-DD)",
+                type=openapi.TYPE_STRING,
+                required=False,
+            ),
+        ],
+        responses={
+            200: openapi.Response(
+                description="Field utilization statistics",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "total_booked_hours": openapi.Schema(type=openapi.TYPE_NUMBER),
+                        "total_available_hours": openapi.Schema(
+                            type=openapi.TYPE_NUMBER
+                        ),
+                        "utilization_rate": openapi.Schema(type=openapi.TYPE_NUMBER),
+                        "booking_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    },
+                ),
+            ),
+            401: "Unauthorized - authentication required",
+            404: "Not found - field does not exist",
+        },
+    )
+    @action(detail=True, methods=["get"])
+    def utilization(self, request, pk=None):
+        """
+        Get field utilization statistics.
+        """
+        field = self.get_object()
+
+        # Get date range from query params
+        from django.utils.dateparse import parse_date
+
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+
+        if start_date:
+            start_date = parse_date(start_date)
+        if end_date:
+            end_date = parse_date(end_date)
+
+        stats = BookingStatisticsCalculator.get_field_utilization_rate(
+            field=field, start_date=start_date, end_date=end_date
+        )
+
+        return Response(stats)
+
+    @swagger_auto_schema(
+        operation_summary="Get field schedule",
+        operation_description="Get booking schedule for a specific field",
+        manual_parameters=[
+            openapi.Parameter(
+                "date",
+                openapi.IN_QUERY,
+                description="Date for schedule (YYYY-MM-DD, defaults to today)",
+                type=openapi.TYPE_STRING,
+                required=False,
+            ),
+            openapi.Parameter(
+                "days",
+                openapi.IN_QUERY,
+                description="Number of days to show (default: 7)",
+                type=openapi.TYPE_INTEGER,
+                required=False,
+            ),
+        ],
+        responses={
+            200: openapi.Response(
+                description="Field schedule",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                ),
+            ),
+            401: "Unauthorized - authentication required",
+            404: "Not found - field does not exist",
+        },
+    )
+    @action(detail=True, methods=["get"])
+    def schedule(self, request, pk=None):
+        """
+        Get field booking schedule.
+        """
+        field = self.get_object()
+
+        # Get date range from query params
+        from datetime import date
+
+        from django.utils.dateparse import parse_date
+
+        start_date = request.query_params.get("date")
+        days = int(request.query_params.get("days", 7))
+
+        if start_date:
+            start_date = parse_date(start_date)
+        else:
+            start_date = date.today()
+
+        end_date = start_date + timedelta(days=days)
+
+        # Get bookings for the date range
+        bookings = field.bookings.filter(
+            start_time__date__gte=start_date,
+            start_time__date__lt=end_date,
+            status__in=["confirmed", "pending"],
+        ).order_by("start_time")
+
+        # Group bookings by date
+        schedule = {}
+        for booking in bookings:
+            booking_date = booking.start_time.date()
+            if booking_date not in schedule:
+                schedule[booking_date] = []
+
+            schedule[booking_date].append(
+                {
+                    "id": booking.id,
+                    "start_time": booking.start_time,
+                    "end_time": booking.end_time,
+                    "status": booking.status,
+                    "booked_by": booking.booked_by.get_full_name()
+                    or booking.booked_by.email,
+                    "total_cost": booking.total_cost,
+                    "notes": booking.notes,
+                }
+            )
+
+        # Create daily schedule including empty days
+        daily_schedule = []
+        current_date = start_date
+        while current_date < end_date:
+            daily_schedule.append(
+                {"date": current_date, "bookings": schedule.get(current_date, [])}
+            )
+            current_date += timedelta(days=1)
+
+        return Response(daily_schedule)
+
 
 class FieldBookingViewSet(AcademyScopedViewSet):
     """
@@ -329,7 +492,7 @@ class FieldBookingViewSet(AcademyScopedViewSet):
     @transaction.atomic
     def perform_create(self, serializer):
         """
-        Create booking with atomic transaction and availability check.
+        Create booking with atomic transaction, availability check, and email notifications.
         """
         field = serializer.validated_data["field"]
         start_time = serializer.validated_data["start_time"]
@@ -361,6 +524,21 @@ class FieldBookingViewSet(AcademyScopedViewSet):
         logger.info(
             f"Created booking {booking.id} for field {field.id} by user {self.request.user.id}"
         )
+
+        # Send email notifications
+        try:
+            # Send confirmation email to customer
+            BookingEmailService.send_booking_created_email(booking)
+
+            # Notify academy admin of new booking
+            BookingEmailService.notify_academy_admin_new_booking(booking)
+
+            logger.info(f"Email notifications sent for booking {booking.id}")
+        except Exception as email_error:
+            logger.error(
+                f"Failed to send email notifications for booking {booking.id}: {str(email_error)}"
+            )
+            # Don't raise exception for email failures, booking should still succeed
 
     @swagger_auto_schema(
         operation_summary="Confirm booking",
@@ -404,6 +582,16 @@ class FieldBookingViewSet(AcademyScopedViewSet):
 
             booking.status = "confirmed"
             booking.save()
+
+            # Send confirmation email to customer
+            try:
+                BookingEmailService.send_booking_confirmed_email(booking)
+                logger.info(f"Booking confirmation email sent for booking {booking.id}")
+            except Exception as email_error:
+                logger.error(
+                    f"Failed to send confirmation email for booking {booking.id}: {str(email_error)}"
+                )
+
             logger.info(f"Confirmed booking {booking.id} by admin {request.user.id}")
             return Response({"status": "confirmed"})
         except Exception as e:
@@ -446,8 +634,27 @@ class FieldBookingViewSet(AcademyScopedViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            # Check if cancellation is by admin or customer
+            is_admin_cancellation = (
+                hasattr(request.user, "academy_admin_profile")
+                and request.user.academy_admin_profile
+                and request.user.academy_admin_profile.academy == booking.field.academy
+            )
+
             booking.status = "cancelled"
             booking.save()
+
+            # Send cancellation email to customer
+            try:
+                BookingEmailService.send_booking_cancelled_email(
+                    booking, cancelled_by_admin=is_admin_cancellation
+                )
+                logger.info(f"Booking cancellation email sent for booking {booking.id}")
+            except Exception as email_error:
+                logger.error(
+                    f"Failed to send cancellation email for booking {booking.id}: {str(email_error)}"
+                )
+
             logger.info(f"Cancelled booking {booking.id} by user {request.user.id}")
             return Response({"status": "cancelled"})
         except Exception as e:
@@ -498,8 +705,197 @@ class FieldBookingViewSet(AcademyScopedViewSet):
 
             booking.status = "completed"
             booking.save()
+
+            # Send completion email to customer
+            try:
+                BookingEmailService.send_booking_completed_email(booking)
+                logger.info(f"Booking completion email sent for booking {booking.id}")
+            except Exception as email_error:
+                logger.error(
+                    f"Failed to send completion email for booking {booking.id}: {str(email_error)}"
+                )
+
             logger.info(f"Completed booking {booking.id} by admin {request.user.id}")
             return Response({"status": "completed"})
         except Exception as e:
             logger.error(f"Error completing booking {pk}: {str(e)}")
             raise
+
+    @swagger_auto_schema(
+        operation_summary="Check booking availability",
+        operation_description="Check if a field is available for a specific time period",
+        request_body=BookingAvailabilitySerializer,
+        responses={
+            200: openapi.Response(
+                description="Availability check result",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "available": openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                        "conflicts": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                        ),
+                        "suggestions": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                        ),
+                        "reason": openapi.Schema(type=openapi.TYPE_STRING),
+                    },
+                ),
+            ),
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+        },
+    )
+    @action(detail=False, methods=["post"])
+    def check_availability(self, request):
+        """
+        Check field availability for a given time period with alternative suggestions.
+        """
+        serializer = BookingAvailabilitySerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            field = Field.objects.get(id=serializer.validated_data["field_id"])
+        except Field.DoesNotExist:
+            return Response(
+                {"error": "Field not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        availability = BookingConflictChecker.check_field_availability(
+            field=field,
+            start_time=serializer.validated_data["start_time"],
+            end_time=serializer.validated_data["end_time"],
+        )
+
+        # Serialize conflict data
+        conflicts_data = []
+        for conflict in availability.get("conflicts", []):
+            conflicts_data.append(
+                {
+                    "id": conflict.id,
+                    "start_time": conflict.start_time,
+                    "end_time": conflict.end_time,
+                    "status": conflict.status,
+                    "booked_by": conflict.booked_by.email,
+                }
+            )
+
+        availability["conflicts"] = conflicts_data
+        return Response(availability)
+
+    @swagger_auto_schema(
+        operation_summary="Get my bookings",
+        operation_description="Get all bookings made by the current user",
+        responses={
+            200: "List of user's bookings",
+            401: "Unauthorized - authentication required",
+        },
+    )
+    @action(detail=False, methods=["get"])
+    def my_bookings(self, request):
+        """
+        Get all bookings for the current user.
+        """
+        queryset = self.get_queryset().filter(booked_by=request.user)
+
+        # Apply filtering
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @swagger_auto_schema(
+        operation_summary="Get academy booking statistics",
+        operation_description="Get booking statistics for academy admin",
+        responses={
+            200: BookingStatisticsSerializer,
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not an academy admin",
+        },
+    )
+    @action(
+        detail=False,
+        methods=["get"],
+        permission_classes=[IsAuthenticated, IsAcademyAdmin],
+    )
+    def statistics(self, request):
+        """
+        Get booking statistics for the academy.
+        """
+        # Get academy from user
+        try:
+            academy = request.user.academy_admin_profile.academy
+        except Exception:
+            return Response(
+                {"error": "User is not associated with any academy"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Get date range from query params
+        from django.utils.dateparse import parse_date
+
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+
+        if start_date:
+            start_date = parse_date(start_date)
+        if end_date:
+            end_date = parse_date(end_date)
+
+        stats = BookingStatisticsCalculator.get_academy_booking_stats(
+            academy_id=academy.id, start_date=start_date, end_date=end_date
+        )
+
+        return Response(stats)
+
+    @swagger_auto_schema(
+        operation_summary="Send booking reminder",
+        operation_description="Send reminder email for upcoming booking",
+        responses={
+            200: "Reminder sent successfully",
+            400: "Bad request - booking not eligible for reminder",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user does not have access to this booking",
+            404: "Not found - booking does not exist",
+        },
+    )
+    @action(detail=True, methods=["post"])
+    def send_reminder(self, request, pk=None):
+        """
+        Send booking reminder email.
+        """
+        booking = self.get_object()
+
+        # Check if booking is confirmed and in the future
+        if booking.status != "confirmed":
+            return Response(
+                {"error": "Can only send reminders for confirmed bookings"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if booking.start_time <= datetime.now():
+            return Response(
+                {"error": "Cannot send reminder for past bookings"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            BookingEmailService.send_booking_reminder_email(booking)
+            logger.info(f"Reminder email sent for booking {booking.id}")
+            return Response({"message": "Reminder sent successfully"})
+        except Exception as e:
+            logger.error(f"Failed to send reminder for booking {booking.id}: {str(e)}")
+            return Response(
+                {"error": "Failed to send reminder email"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

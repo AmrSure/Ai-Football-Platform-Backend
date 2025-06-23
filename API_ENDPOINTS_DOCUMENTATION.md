@@ -2,7 +2,16 @@
 
 ## 🚀 Overview
 
-The AI Football Platform API provides comprehensive endpoints for managing football academies, players, coaches, matches, analytics, and more. All endpoints use **email-based JWT authentication** and support atomic transactions for data consistency.
+The AI Football Platform API provides comprehensive endpoints for managing football academies, players, coaches, matches, bookings, analytics, and notifications. All endpoints use **email-based JWT authentication** and support **atomic transactions** for data consistency and reliability.
+
+### ✨ Latest Updates
+- **Atomic Transactions**: All write operations wrapped with `@transaction.atomic` for data consistency
+- **Advanced Booking System**: Complete field booking system with conflict detection and email notifications
+- **Email Automation**: Professional email templates for booking lifecycle management
+- **Enhanced Serializers**: Comprehensive serializers for all models with proper validation
+- **Nested Data Support**: Academy endpoints return complete nested object hierarchies
+- **Conflict Prevention**: Sophisticated booking overlap detection with alternative suggestions
+- **Management Commands**: Automated booking reminder system with cron support
 
 ## 📋 Table of Contents
 
@@ -12,10 +21,12 @@ The AI Football Platform API provides comprehensive endpoints for managing footb
 4. [Academy Management](#academy-management)
 5. [Player Management](#player-management)
 6. [Match Management](#match-management)
-7. [Booking Management](#booking-management)
-8. [Analytics](#analytics)
+7. [Advanced Booking System](#advanced-booking-system)
+8. [Analytics & Reporting](#analytics--reporting)
 9. [Notifications](#notifications)
-10. [Error Handling](#error-handling)
+10. [Email System](#email-system)
+11. [Management Commands](#management-commands)
+12. [Error Handling](#error-handling)
 
 ---
 
@@ -986,7 +997,15 @@ GET /api/v1/matches/{match_id}/statistics/
 
 ---
 
-## 📅 Booking Management
+## 📅 Advanced Booking System
+
+### 🎯 Features
+- **Conflict Detection**: Automatic booking overlap prevention
+- **Email Notifications**: Complete lifecycle email automation
+- **Availability Checking**: Real-time field availability with suggestions
+- **Cost Calculation**: Automatic pricing based on duration and field rates
+- **Booking Analytics**: Comprehensive statistics and utilization reports
+- **Reminder System**: Automated booking reminders via management commands
 
 ### 1. **List Fields**
 ```http
@@ -1107,35 +1126,89 @@ POST /api/v1/bookings/{booking_id}/complete/
 
 ---
 
-### 5. **Field Availability**
+### 5. **Advanced Booking Availability Check**
 ```http
-GET /api/v1/fields/{field_id}/availability/
+POST /api/v1/bookings/check_availability/
 ```
 
-**Query Parameters:**
-- `date`: Check availability for specific date (YYYY-MM-DD)
-- `start_time`: Start time for availability check
-- `end_time`: End time for availability check
+**Request Body:**
+```json
+{
+  "field": 1,
+  "start_time": "2024-01-25T15:00:00Z",
+  "end_time": "2024-01-25T17:00:00Z"
+}
+```
 
 **Success Response (200):**
 ```json
 {
-  "is_available": true,
-  "available_slots": [
+  "available": true,
+  "conflicts": [],
+  "suggestions": [
     {
-      "start_time": "09:00:00",
-      "end_time": "11:00:00"
-    },
-    {
-      "start_time": "13:00:00",
-      "end_time": "15:00:00"
+      "start_time": "2024-01-25T13:00:00Z",
+      "end_time": "2024-01-25T15:00:00Z",
+      "reason": "Alternative slot available"
     }
   ],
-  "booked_slots": [
+  "estimated_cost": "300.00",
+  "reason": "Field is available for requested time"
+}
+```
+
+**Conflict Response (200):**
+```json
+{
+  "available": false,
+  "conflicts": [
     {
-      "start_time": "11:00:00",
-      "end_time": "13:00:00",
-      "booking_id": 5
+      "booking_id": 15,
+      "start_time": "2024-01-25T14:00:00Z",
+      "end_time": "2024-01-25T16:00:00Z",
+      "booked_by": "Ahmed Player"
+    }
+  ],
+  "suggestions": [
+    {
+      "start_time": "2024-01-25T16:00:00Z",
+      "end_time": "2024-01-25T18:00:00Z",
+      "reason": "Next available slot"
+    },
+    {
+      "start_time": "2024-01-25T12:00:00Z",
+      "end_time": "2024-01-25T14:00:00Z",
+      "reason": "Earlier slot available"
+    }
+  ],
+  "reason": "Booking conflicts with existing reservation"
+}
+```
+
+---
+
+### 6. **My Bookings**
+```http
+GET /api/v1/bookings/my_bookings/
+```
+
+**Success Response (200):**
+```json
+{
+  "count": 5,
+  "results": [
+    {
+      "id": 20,
+      "field": {
+        "id": 1,
+        "name": "Main Field",
+        "academy": "Elite Football Academy"
+      },
+      "start_time": "2024-01-25T15:00:00Z",
+      "end_time": "2024-01-25T17:00:00Z",
+      "status": "confirmed",
+      "total_cost": "300.00",
+      "created_at": "2024-01-20T10:00:00Z"
     }
   ]
 }
@@ -1143,7 +1216,121 @@ GET /api/v1/fields/{field_id}/availability/
 
 ---
 
-## 📊 Analytics
+### 7. **Booking Statistics (Academy Admin)**
+```http
+GET /api/v1/bookings/statistics/
+```
+
+**Success Response (200):**
+```json
+{
+  "total_bookings": 125,
+  "confirmed_bookings": 95,
+  "pending_bookings": 15,
+  "cancelled_bookings": 15,
+  "total_revenue": "18750.00",
+  "average_booking_duration": 2.5,
+  "peak_booking_hours": ["15:00", "16:00", "17:00"],
+  "most_popular_field": {
+    "id": 1,
+    "name": "Main Field",
+    "booking_count": 65
+  },
+  "monthly_stats": [
+    {
+      "month": "2024-01",
+      "bookings": 45,
+      "revenue": "6750.00"
+    }
+  ]
+}
+```
+
+---
+
+### 8. **Send Booking Reminder**
+```http
+POST /api/v1/bookings/{booking_id}/send_reminder/
+```
+
+**Success Response (200):**
+```json
+{
+  "message": "Reminder email sent successfully",
+  "sent_to": "player@elite.com",
+  "reminder_type": "upcoming_booking"
+}
+```
+
+---
+
+### 9. **Field Utilization**
+```http
+GET /api/v1/fields/{field_id}/utilization/
+```
+
+**Query Parameters:**
+- `start_date`: Start date for analysis (YYYY-MM-DD)
+- `end_date`: End date for analysis (YYYY-MM-DD)
+
+**Success Response (200):**
+```json
+{
+  "total_booked_hours": 156.5,
+  "total_available_hours": 210.0,
+  "utilization_rate": 74.5,
+  "booking_count": 45,
+  "peak_hours": ["15:00", "16:00", "17:00"],
+  "revenue_generated": "23475.00"
+}
+```
+
+---
+
+### 10. **Field Schedule**
+```http
+GET /api/v1/fields/{field_id}/schedule/
+```
+
+**Query Parameters:**
+- `date`: Start date for schedule (YYYY-MM-DD, defaults to today)
+- `days`: Number of days to show (default: 7)
+
+**Success Response (200):**
+```json
+[
+  {
+    "date": "2024-01-25",
+    "bookings": [
+      {
+        "id": 15,
+        "start_time": "15:00:00",
+        "end_time": "17:00:00",
+        "booked_by": "Ahmed Player",
+        "status": "confirmed"
+      },
+      {
+        "id": 16,
+        "start_time": "18:00:00",
+        "end_time": "20:00:00",
+        "booked_by": "John Coach",
+        "status": "pending"
+      }
+    ]
+  }
+]
+```
+
+---
+
+## 📊 Analytics & Reporting
+
+### 🎯 Enhanced Features
+- **Real-time Statistics**: Live academy, player, and field analytics
+- **Performance Tracking**: Player and team performance metrics
+- **Utilization Reports**: Field usage and booking analytics
+- **Trend Analysis**: Monthly growth and performance trends
+- **Custom Filtering**: Filter by academy, date range, and specific criteria
 
 ### 1. **Academy Overview**
 ```http
@@ -1339,6 +1526,126 @@ GET /api/v1/notifications/statistics/
 
 ---
 
+## 📧 Email System
+
+### 🎯 Automated Email Notifications
+
+The platform includes a comprehensive email notification system for booking lifecycle management:
+
+### **Email Types**
+
+#### 1. **Booking Created**
+- **Trigger**: When a new booking is submitted
+- **Recipient**: Customer
+- **Content**: Booking confirmation with details and next steps
+
+#### 2. **Booking Confirmed**
+- **Trigger**: When academy admin approves a booking
+- **Recipient**: Customer
+- **Content**: Confirmation with arrival instructions and contact info
+
+#### 3. **Booking Cancelled**
+- **Trigger**: When booking is cancelled by admin or customer
+- **Recipient**: Customer or Admin
+- **Content**: Cancellation notice with refund information
+
+#### 4. **Booking Reminder**
+- **Trigger**: 24 hours before booking (automated)
+- **Recipient**: Customer
+- **Content**: Reminder with checklist and academy contact
+
+#### 5. **Booking Completed**
+- **Trigger**: After booking end time
+- **Recipient**: Customer
+- **Content**: Thank you message with feedback request
+
+#### 6. **Admin New Booking**
+- **Trigger**: When new booking is submitted
+- **Recipient**: Academy Admin
+- **Content**: New booking notification with customer details
+
+### **Email Configuration**
+
+**Environment Variables (.env file):**
+```bash
+# Email Configuration (Mailtrap)
+EMAIL_HOST=sandbox.smtp.mailtrap.io
+EMAIL_HOST_USER=3a92a30635c240
+EMAIL_HOST_PASSWORD=f40c398838ce54
+EMAIL_PORT=2525
+EMAIL_USE_TLS=True
+EMAIL_USE_SSL=False
+DEFAULT_FROM_EMAIL=AI Football Platform <noreply@aifootballplatform.com>
+```
+
+**Django Settings (uses environment variables):**
+```python
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = env('EMAIL_HOST', default='sandbox.smtp.mailtrap.io')
+EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
+EMAIL_PORT = env('EMAIL_PORT', default=2525)
+EMAIL_USE_TLS = env.bool('EMAIL_USE_TLS', default=True)
+EMAIL_USE_SSL = env.bool('EMAIL_USE_SSL', default=False)
+DEFAULT_FROM_EMAIL = env('DEFAULT_FROM_EMAIL', default='AI Football Platform <noreply@aifootballplatform.com>')
+```
+
+**Production Environment:**
+```python
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'your-production-smtp-host.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'your-production-email@domain.com'
+EMAIL_HOST_PASSWORD = 'your-production-password'
+```
+
+### **Email Templates**
+
+All emails use professional HTML templates with:
+- Academy branding and colors
+- Responsive design for mobile devices
+- Clear call-to-action buttons
+- Contact information and support links
+- Booking details and instructions
+
+---
+
+## 🔧 Management Commands
+
+### **Send Booking Reminders**
+
+Automated command for sending booking reminders:
+
+```bash
+# Send reminders for bookings in next 24 hours
+python manage.py send_booking_reminders
+
+# Send reminders for specific hours ahead
+python manage.py send_booking_reminders --hours 48
+
+# Dry run to test without sending emails
+python manage.py send_booking_reminders --dry-run
+
+# Verbose output
+python manage.py send_booking_reminders --verbosity 2
+```
+
+**Cron Job Setup:**
+```bash
+# Add to crontab for daily execution at 9 AM
+0 9 * * * /path/to/venv/bin/python /path/to/project/manage.py send_booking_reminders
+```
+
+**Command Features:**
+- Configurable hours ahead (default: 24)
+- Dry-run capability for testing
+- Comprehensive error handling and logging
+- Email sending status tracking
+- Duplicate prevention
+
+---
+
 ## ❌ Error Handling
 
 ### Common HTTP Status Codes
@@ -1387,41 +1694,132 @@ GET /api/v1/notifications/statistics/
 
 ## 🧪 Testing
 
-### Creating Test Users
+### **System Check**
 ```bash
-# System Admin
-python manage.py create_test_user --email admin@test.com --password admin123 --superuser
+# Verify all systems are working
+python manage.py check
 
-# Academy Admin
-python manage.py create_test_user --email academy@test.com --user-type academy_admin
-
-# Coach
-python manage.py create_test_user --email coach@test.com --user-type coach
-
-# Player
-python manage.py create_test_user --email player@test.com --user-type player
+# Run with specific settings
+python manage.py check --settings=config.settings.production
 ```
 
-### Sample API Test
+### **Environment Setup**
+```bash
+# 1. Copy environment variables template
+cp env.example .env
+
+# 2. Edit .env file with your settings
+# (Email credentials are already set for Mailtrap)
+
+# 3. Create and apply migrations
+python manage.py makemigrations
+python manage.py migrate
+
+# 4. Create superuser
+python manage.py createsuperuser
+```
+
+### **Sample API Tests**
+
+#### **Authentication Test**
 ```bash
 # Login
 curl -X POST http://localhost:8000/api/v1/auth/login/ \
   -H "Content-Type: application/json" \
   -d '{"username": "admin@test.com", "password": "admin123"}'
+```
 
-# Use token for authenticated requests
-curl -X GET http://localhost:8000/api/v1/academies/ \
+#### **Academy Management Test**
+```bash
+# Get academy with all nested objects
+curl -X GET http://localhost:8000/api/v1/academies/1/ \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
+
+#### **Booking System Test**
+```bash
+# Check availability
+curl -X POST http://localhost:8000/api/v1/bookings/check_availability/ \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "field": 1,
+    "start_time": "2024-01-25T15:00:00Z",
+    "end_time": "2024-01-25T17:00:00Z"
+  }'
+
+# Create booking
+curl -X POST http://localhost:8000/api/v1/bookings/ \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "field": 1,
+    "start_time": "2024-01-25T15:00:00Z",
+    "end_time": "2024-01-25T17:00:00Z",
+    "notes": "Training session"
+  }'
+```
+
+#### **Analytics Test**
+```bash
+# Get academy overview
+curl -X GET http://localhost:8000/api/v1/analytics/academy_overview/ \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### **Email Testing**
+```bash
+# Test booking reminders (dry run)
+python manage.py send_booking_reminders --dry-run
+
+# Send actual test reminders
+python manage.py send_booking_reminders
+
+# Check emails in Mailtrap inbox
+# Visit: https://mailtrap.io/inboxes
+# Login with your Mailtrap account to see sent emails
+```
+
+**Mailtrap Integration:**
+- All emails are captured by Mailtrap for testing
+- No emails reach real recipients during development
+- Professional email previews with HTML rendering
+- Easy testing of email templates and content
 
 ---
 
 ## 📖 Additional Resources
 
-- **Swagger Documentation**: `/api/docs/`
-- **ReDoc Documentation**: `/api/redoc/`
-- **Admin Interface**: `/admin/` (email-based login)
+### **API Documentation**
+- **Swagger Documentation**: `/api/docs/` - Interactive API explorer
+- **ReDoc Documentation**: `/api/redoc/` - Detailed API documentation
+- **Admin Interface**: `/admin/` - Django admin (email-based login)
+
+### **Key Features Summary**
+- ✅ **Atomic Transactions**: All write operations are transaction-safe
+- ✅ **Email Automation**: Complete booking lifecycle email system
+- ✅ **Conflict Prevention**: Advanced booking overlap detection
+- ✅ **Nested Data**: Academy endpoints return comprehensive object hierarchies
+- ✅ **Real-time Analytics**: Live statistics and reporting
+- ✅ **Management Commands**: Automated reminder and maintenance tasks
+- ✅ **Professional UI**: Responsive email templates and admin interface
+- ✅ **Comprehensive Validation**: Robust data validation and error handling
+
+### **System Architecture**
+- **Backend**: Django 4.x with Django REST Framework
+- **Authentication**: JWT with email-based login
+- **Database**: PostgreSQL (recommended) or SQLite for development
+- **Email**: SMTP integration with HTML templates
+- **Documentation**: Auto-generated OpenAPI/Swagger specs
+- **Permissions**: Role-based access control with academy scoping
+
+### **Production Deployment**
+- Configure SMTP settings for email functionality
+- Set up cron jobs for automated booking reminders
+- Configure static file serving for media uploads
+- Set up proper logging and monitoring
+- Configure database connection pooling
 
 ---
 
-*This documentation covers all available endpoints in the AI Football Platform API. For the most up-to-date information, refer to the interactive API documentation at `/api/docs/`.*
+*This documentation covers all 44+ endpoints across 9 categories in the AI Football Platform API. The system includes atomic transactions, comprehensive email automation, advanced booking conflict detection, and real-time analytics. For the most up-to-date information, refer to the interactive API documentation at `/api/docs/`.*

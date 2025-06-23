@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booking Reminder</title>
+    <style>
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .header {
+            background-color: #f59e0b;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .content {
+            padding: 20px;
+            background-color: #f9fafb;
+        }
+        .booking-details {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #f59e0b;
+        }
+        .detail-row {
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .detail-label {
+            font-weight: bold;
+            color: #374151;
+        }
+        .detail-value {
+            color: #6b7280;
+        }
+        .status-confirmed {
+            background-color: #d1fae5;
+            color: #065f46;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .footer {
+            background-color: #374151;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 14px;
+        }
+        .button {
+            display: inline-block;
+            background-color: #f59e0b;
+            color: white;
+            padding: 12px 24px;
+            text-decoration: none;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .reminder-icon {
+            font-size: 48px;
+            color: #f59e0b;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .highlight-box {
+            background-color: #fffbeb;
+            border: 2px solid #f59e0b;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <div class="reminder-icon">⏰</div>
+            <h1>Booking Reminder</h1>
+            <p>Your field booking is coming up soon!</p>
+        </div>
+
+        <div class="content">
+            <p>Dear {{ user_name }},</p>
+
+            <div class="highlight-box">
+                <h3>Don't forget about your upcoming booking!</h3>
+                <p><strong>{{ booking.start_time|date:"F d, Y" }} at {{ booking.start_time|time:"g:i A" }}</strong></p>
+            </div>
+
+            <p>This is a friendly reminder that you have a confirmed field booking tomorrow. Please make sure you're prepared and arrive on time.</p>
+
+            <div class="booking-details">
+                <h3>Booking Details</h3>
+
+                <div class="detail-row">
+                    <span class="detail-label">Booking ID:</span>
+                    <span class="detail-value">#{{ booking.id }}</span>
+                </div>
+
+                <div class="detail-row">
+                    <span class="detail-label">Academy:</span>
+                    <span class="detail-value">{{ academy.name }}</span>
+                </div>
+
+                <div class="detail-row">
+                    <span class="detail-label">Field:</span>
+                    <span class="detail-value">{{ field.name }} ({{ field.field_type|title }})</span>
+                </div>
+
+                <div class="detail-row">
+                    <span class="detail-label">Date & Time:</span>
+                    <span class="detail-value">{{ booking.start_time|date:"F d, Y" }} from {{ booking.start_time|time:"g:i A" }} to {{ booking.end_time|time:"g:i A" }}</span>
+                </div>
+
+                <div class="detail-row">
+                    <span class="detail-label">Duration:</span>
+                    <span class="detail-value">{{ booking.duration_hours }} hours</span>
+                </div>
+
+                <div class="detail-row">
+                    <span class="detail-label">Total Cost:</span>
+                    <span class="detail-value">${{ booking.total_cost }}</span>
+                </div>
+
+                <div class="detail-row">
+                    <span class="detail-label">Status:</span>
+                    <span class="status-confirmed">{{ booking.status|upper }}</span>
+                </div>
+
+                {% if booking.notes %}
+                <div class="detail-row">
+                    <span class="detail-label">Notes:</span>
+                    <span class="detail-value">{{ booking.notes }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            <p><strong>Pre-Booking Checklist:</strong></p>
+            <ul>
+                <li>✓ Arrive 15 minutes early</li>
+                <li>✓ Bring this confirmation email</li>
+                <li>✓ Bring appropriate sports equipment</li>
+                <li>✓ Have payment ready (if required)</li>
+                <li>✓ Check weather conditions</li>
+                <li>✓ Confirm transportation arrangements</li>
+            </ul>
+
+            {% if booking_url %}
+            <p style="text-align: center;">
+                <a href="{{ booking_url }}" class="button">View Booking Details</a>
+            </p>
+            {% endif %}
+
+            <p><strong>Academy Contact Information:</strong></p>
+            <ul>
+                <li>Email: {{ academy.email }}</li>
+                <li>Phone: {{ academy.phone }}</li>
+                {% if academy.address %}
+                <li>Address: {{ academy.address }}</li>
+                {% endif %}
+            </ul>
+
+            <p><strong>Need to make changes?</strong> Contact the academy as soon as possible if you need to cancel or reschedule your booking.</p>
+
+            <p>We look forward to seeing you tomorrow!</p>
+        </div>
+
+        <div class="footer">
+            <p>This is an automated message. Please do not reply to this email.</p>
+            <p>&copy; 2024 AI Football Platform. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>

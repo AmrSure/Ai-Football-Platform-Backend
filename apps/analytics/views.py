@@ -169,7 +169,7 @@ class AnalyticsViewSet(BaseModelViewSet):
         """
         Get player performance statistics.
         """
-        from apps.players.models import PlayerProfile
+        from apps.academies.models import PlayerProfile
 
         # Build queryset based on permissions and filters
         queryset = PlayerProfile.objects.filter(is_active=True)

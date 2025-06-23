@@ -74,10 +74,16 @@ This platform provides a comprehensive solution for football academies to manage
    pip install -r requirements/development.txt
    ```
 
-4. Create a `.env` file based on `.env.example`:
+4. Create a `.env` file based on `env.example`:
    ```bash
-   cp .env.example .env
+   cp env.example .env
    ```
+
+   The `.env` file includes email configuration for Mailtrap:
+   - **EMAIL_HOST**: sandbox.smtp.mailtrap.io
+   - **EMAIL_HOST_USER**: 3a92a30635c240
+   - **EMAIL_HOST_PASSWORD**: f40c398838ce54
+   - **EMAIL_PORT**: 2525
 
 5. Apply migrations:
    ```bash
