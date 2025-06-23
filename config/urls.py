@@ -27,33 +27,119 @@ schema_view = get_schema_view(
 
         ## Authentication
 
-        The API uses JWT (JSON Web Token) authentication. To authenticate:
+        The API uses **email-based JWT (JSON Web Token) authentication**. To authenticate:
 
-        1. Obtain a token pair by sending a POST request to `/api/v1/auth/login/` with your username and password
-        2. Include the access token in the Authorization header of your requests: `Authorization: Bearer <token>`
-        3. When the access token expires, use the refresh token to get a new one via `/api/v1/auth/refresh/`
+        1. **Login**: Send a POST request to `/api/v1/auth/login/` with your email and password:
+           ```json
+           {
+             "username": "user@example.com",  // Note: field name is "username" for JWT compatibility
+             "password": "your_password"
+           }
+           ```
 
-        ## User Types
+        2. **Authorization**: Include the access token in the Authorization header of your requests:
+           ```
+           Authorization: Bearer <access_token>
+           ```
 
-        The platform supports different user types with different permissions:
+        3. **Token Refresh**: When the access token expires, use the refresh token to get a new one via `/api/v1/auth/refresh/`:
+           ```json
+           {
+             "refresh": "your_refresh_token"
+           }
+           ```
 
-        - **System Admin**: Full access to all features
-        - **Academy Admin**: Can manage their academy, coaches, players, and parents
-        - **Coach**: Can manage their assigned players and matches
-        - **Player**: Can view their profile, matches, and analytics
-        - **Parent**: Can view their children's profiles, matches, and analytics
-        - **External Client**: Can book facilities and services
+        ## Important: Email-Based Authentication
+
+        - ✅ **Login Field**: Use `email` address instead of username
+        - ✅ **JWT Field Name**: The login endpoint still uses `"username"` field name for JWT compatibility, but expects an email address as the value
+        - ✅ **Case Insensitive**: Email lookup is case-insensitive
+        - ✅ **Unique Identifier**: Email serves as the unique user identifier
+
+        ## User Registration
+
+        ### External Client Registration (Self-Registration)
+        ```json
+        POST /api/v1/auth/register/
+        {
+          "email": "user@example.com",
+          "password": "secure_password",
+          "password_confirm": "secure_password",
+          "first_name": "John",
+          "last_name": "Doe",
+          "user_type": "external_client",
+          "phone": "+1234567890"  // optional
+        }
+        ```
+
+        ### Academy User Registration (Academy Admin Only)
+        ```json
+        POST /api/v1/auth/academy/register-user/
+        {
+          "email": "coach@academy.com",
+          "password": "secure_password",
+          "first_name": "Jane",
+          "last_name": "Smith",
+          "user_type": "coach",  // or "player", "parent"
+          "academy_id": 1,
+          "phone": "+1234567890"  // optional
+        }
+        ```
+
+        ## User Types & Permissions
+
+        The platform supports different user types with specific permissions:
+
+        - **System Admin**: Full access to all features and system management
+        - **Academy Admin**: Manage their academy, register/manage coaches, players, and parents
+        - **Coach**: Manage assigned players, create/update matches, view analytics
+        - **Player**: View profile, matches, performance analytics
+        - **Parent**: View children's profiles, matches, and analytics
+        - **External Client**: Book facilities and services, limited access
 
         ## API Structure
 
-        - `/api/v1/auth/`: Authentication endpoints
-        - `/api/v1/academy-users/`: Academy user management (for academy admins)
-        - `/api/v1/academies/`: Academy management
-        - `/api/v1/players/`: Player management
-        - `/api/v1/matches/`: Match management
-        - `/api/v1/bookings/`: Facility booking
-        - `/api/v1/analytics/`: Performance analytics
-        - `/api/v1/notifications/`: User notifications
+        - **🔐 Authentication**: `/api/v1/auth/` - Login, registration, password management
+        - **👥 User Management**:
+          - `/api/v1/users/` - System admin user management
+          - `/api/v1/academy-users/` - Academy admin user management
+        - **🏟️ Academies**: `/api/v1/academies/` - Academy management and profiles
+        - **⚽ Players**: `/api/v1/players/` - Player profiles and management
+        - **🥅 Matches**: `/api/v1/matches/` - Match scheduling and management
+        - **📅 Bookings**: `/api/v1/bookings/` - Facility and service bookings
+        - **📊 Analytics**: `/api/v1/analytics/` - Performance analytics and reporting
+        - **🔔 Notifications**: `/api/v1/notifications/` - User notifications and messaging
+
+        ## Response Format
+
+        All API responses follow a consistent format:
+
+        **Successful Response:**
+        ```json
+        {
+          "id": 1,
+          "email": "user@example.com",
+          "first_name": "John",
+          "last_name": "Doe",
+          "user_type": "player",
+          "created_at": "2024-01-01T00:00:00Z"
+        }
+        ```
+
+        **Error Response:**
+        ```json
+        {
+          "error": "Invalid credentials",
+          "detail": "No active account found with the given credentials"
+        }
+        ```
+
+        ## Testing
+
+        For development and testing, you can create test users using the management command:
+        ```bash
+        python manage.py create_test_user --email admin@test.com --password admin123 --superuser
+        ```
         """,
         terms_of_service="https://www.example.com/terms/",
         contact=openapi.Contact(email="contact@example.com"),

@@ -23,18 +23,17 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     name, and other relevant data.
 
     Fields:
-    - username: User's username for authentication
+    - email: User's email for authentication
     - password: User's password for authentication
 
     Returns:
     - access: JWT access token
     - refresh: JWT refresh token
     - user_id: ID of the authenticated user
-    - username: Username of the authenticated user
+    - email: Email of the authenticated user
     - user_type: Type of the authenticated user (system_admin, academy_admin, coach, etc.)
     - first_name: First name of the authenticated user
     - last_name: Last name of the authenticated user
-    - email: Email of the authenticated user
     """
 
     def validate(self, attrs):
@@ -46,11 +45,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data.update(
             {
                 "user_id": user.id,
-                "username": user.username,
+                "email": user.email,
                 "user_type": user.user_type,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
-                "email": user.email,
             }
         )
 
@@ -65,8 +63,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     Validates that passwords match and creates appropriate user profile.
 
     Fields:
-    - username: Unique username for the account
-    - email: Valid email address
+    - email: Valid email address (used for login)
     - password: Password meeting complexity requirements
     - password_confirm: Must match password
     - first_name: User's first name
@@ -81,7 +78,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "username",
             "email",
             "password",
             "password_confirm",
@@ -140,8 +136,7 @@ class AcademyUserRegistrationSerializer(serializers.ModelSerializer):
     Creates appropriate user profile and associates it with the specified academy.
 
     Fields:
-    - username: Unique username for the account
-    - email: Valid email address
+    - email: Valid email address (used for login)
     - password: Password meeting complexity requirements
     - user_type: One of 'coach', 'player', or 'parent'
     - academy_id: ID of the academy to associate the user with
@@ -156,7 +151,6 @@ class AcademyUserRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "username",
             "email",
             "password",
             "first_name",

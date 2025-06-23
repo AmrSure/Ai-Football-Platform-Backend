@@ -13,7 +13,6 @@ class CustomUserAdmin(UserAdmin):
 
     list_display = [
         "id",
-        "username",
         "email",
         "first_name",
         "last_name",
@@ -22,14 +21,14 @@ class CustomUserAdmin(UserAdmin):
         "is_active",
     ]
     list_filter = ["is_active", "user_type", "is_staff", "is_superuser", "date_joined"]
-    search_fields = ["username", "email", "first_name", "last_name", "phone"]
+    search_fields = ["email", "first_name", "last_name", "phone"]
     ordering = ["-date_joined"]
 
     fieldsets = (
-        (None, {"fields": ("username", "password")}),
+        (None, {"fields": ("email", "password")}),
         (
             "Personal info",
-            {"fields": ("first_name", "last_name", "email", "phone", "avatar")},
+            {"fields": ("first_name", "last_name", "phone", "avatar")},
         ),
         ("User Type", {"fields": ("user_type",)}),
         (
@@ -52,7 +51,14 @@ class CustomUserAdmin(UserAdmin):
             None,
             {
                 "classes": ("wide",),
-                "fields": ("username", "email", "password1", "password2", "user_type"),
+                "fields": (
+                    "email",
+                    "password1",
+                    "password2",
+                    "user_type",
+                    "first_name",
+                    "last_name",
+                ),
             },
         ),
     )

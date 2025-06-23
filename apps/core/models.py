@@ -5,7 +5,7 @@ application. It includes the custom User model, base models with common fields,
 and utility models.
 """
 
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.utils import timezone
 from polymorphic.models import PolymorphicModel
@@ -28,10 +28,67 @@ class BaseModel(models.Model):
         abstract = True
 
 
+class CustomUserManager(BaseUserManager):
+    """
+    Custom user manager that handles creating users with email instead of username.
+
+    This manager provides methods to create regular users and superusers using
+    email as the unique identifier instead of username.
+    """
+
+    def create_user(self, email, password=None, **extra_fields):
+        """
+        Create and return a regular user with an email and password.
+
+        Args:
+            email: The user's email address
+            password: The user's password
+            **extra_fields: Additional fields for the user
+
+        Returns:
+            User: The created user instance
+
+        Raises:
+            ValueError: If email is not provided
+        """
+        if not email:
+            raise ValueError("The Email field must be set")
+
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        """
+        Create and return a superuser with an email and password.
+
+        Args:
+            email: The superuser's email address
+            password: The superuser's password
+            **extra_fields: Additional fields for the superuser
+
+        Returns:
+            User: The created superuser instance
+        """
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        extra_fields.setdefault("user_type", "system_admin")
+
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Superuser must have is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Superuser must have is_superuser=True.")
+
+        return self.create_user(email, password, **extra_fields)
+
+
 class User(AbstractUser):
     """
     Extended User model that serves as the central authentication entity.
     Inherits from Django's AbstractUser and adds custom fields.
+    Uses email for authentication instead of username.
 
     Relationships:
     - One-to-One with UserProfile (polymorphic)
@@ -51,15 +108,32 @@ class User(AbstractUser):
         ("external_client", "External Client"),
     )
 
+    # Remove username field by setting it to None
+    username = None
+
+    # Make email unique and required
+    email = models.EmailField(unique=True)
+
     user_type = models.CharField(max_length=20, choices=USER_TYPES)
     phone = models.CharField(max_length=15, blank=True)
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
     # language = models.CharField(max_length=2, choices=[('en', 'English'), ('ar', 'Arabic')], default='en')
 
+    # Use email as the username field
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = ["first_name", "last_name", "user_type"]
+
+    # Use custom user manager
+    objects = CustomUserManager()
+
     class Meta:
         """Meta options for User model."""
 
         db_table = "auth_user"
+
+    def __str__(self):
+        """Return string representation of the user."""
+        return f"{self.email} - {self.get_user_type_display()}"
 
 
 class UserProfile(PolymorphicModel, BaseModel):
@@ -83,7 +157,7 @@ class UserProfile(PolymorphicModel, BaseModel):
 
     def __str__(self):
         """Return string representation of the user profile."""
-        return f"{self.user.username} - {self.user.user_type}"
+        return f"{self.user.email} - {self.user.get_user_type_display()}"
 
 
 # apps/core/models.py (Additional base classes)

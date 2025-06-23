@@ -104,6 +104,12 @@ DATABASES = {
 # Custom User Model
 AUTH_USER_MODEL = "core.User"
 
+# Authentication Backends
+AUTHENTICATION_BACKENDS = [
+    "apps.core.authentication.EmailBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -193,6 +199,7 @@ SIMPLE_JWT = {
     "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
+    "USERNAME_FIELD": "email",
 }
 
 # CORS Settings

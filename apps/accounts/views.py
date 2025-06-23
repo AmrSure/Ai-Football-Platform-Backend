@@ -1,5 +1,8 @@
+import logging
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.db import transaction
 from django.db.models import Q
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -24,13 +27,43 @@ from .serializers import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
-    Takes a set of user credentials and returns an access and refresh JSON web token pair.
+    Email-based JWT Token Authentication Endpoint.
 
-    This custom implementation may provide additional data in the response.
+    Takes user email and password and returns an access and refresh JSON web token pair
+    along with additional user information.
+
+    **Authentication Method**: Email + Password
+
+    **Request Format**:
+    ```json
+    {
+      "username": "user@example.com",  // Field name is "username" but expects email address
+      "password": "your_password"
+    }
+    ```
+
+    **Response Format**:
+    ```json
+    {
+      "access": "jwt_access_token",
+      "refresh": "jwt_refresh_token",
+      "user_id": 1,
+      "email": "user@example.com",
+      "user_type": "player",
+      "first_name": "John",
+      "last_name": "Doe"
+    }
+    ```
+
+    **Features**:
+    - Email-based authentication (case-insensitive)
+    - Returns extended user information in token response
+    - Compatible with standard JWT token refresh flow
     """
 
     serializer_class = CustomTokenObtainPairSerializer
@@ -38,18 +71,18 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
 class RegisterView(generics.CreateAPIView):
     """
-    API endpoint for external client self-registration.
+    API endpoint for external client self-registration with atomic transaction support.
 
     Only allows registration with user_type='external_client'.
     Other user types must be registered by an academy admin.
+    All database operations are executed atomically to ensure data consistency.
 
     Required fields:
-    - username: Unique username for the account
-    - email: Valid email address
+    - email: Valid email address (used for login)
     - password: Password meeting complexity requirements
     - password_confirm: Must match password
     - first_name: User's first name
-    - last_name: User's last name
+    - last_name: User's last_name
     - user_type: Must be 'external_client'
 
     Optional fields:
@@ -59,6 +92,21 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserRegistrationSerializer
     permission_classes = [AllowAny]
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        """
+        Create user and profile with atomic transaction.
+
+        Ensures that both user creation and profile creation are
+        executed atomically to maintain data consistency.
+        """
+        try:
+            user = serializer.save()
+            logger.info(f"Successfully created external client user: {user.email}")
+        except Exception as e:
+            logger.error(f"Error creating external client user: {str(e)}")
+            raise
 
     @swagger_auto_schema(
         operation_summary="Register a new external client user",
@@ -70,7 +118,6 @@ class RegisterView(generics.CreateAPIView):
                     type=openapi.TYPE_OBJECT,
                     properties={
                         "id": openapi.Schema(type=openapi.TYPE_INTEGER),
-                        "username": openapi.Schema(type=openapi.TYPE_STRING),
                         "email": openapi.Schema(type=openapi.TYPE_STRING),
                         "first_name": openapi.Schema(type=openapi.TYPE_STRING),
                         "last_name": openapi.Schema(type=openapi.TYPE_STRING),
@@ -88,14 +135,14 @@ class RegisterView(generics.CreateAPIView):
 
 class AcademyUserRegistrationView(generics.CreateAPIView):
     """
-    API endpoint for academy admins to register coaches, players, and parents.
+    API endpoint for academy admins to register coaches, players, and parents with atomic transaction support.
 
     Only academy admins can access this endpoint. Only allows registration of users with
     user_type in ['coach', 'player', 'parent'].
+    All database operations are executed atomically to ensure data consistency.
 
     Required fields:
-    - username: Unique username for the account
-    - email: Valid email address
+    - email: Valid email address (used for login)
     - password: Password meeting complexity requirements
     - user_type: One of 'coach', 'player', or 'parent'
     - academy_id: ID of the academy to associate the user with
@@ -110,6 +157,23 @@ class AcademyUserRegistrationView(generics.CreateAPIView):
     serializer_class = AcademyUserRegistrationSerializer
     permission_classes = [IsAuthenticated, IsAcademyAdmin]
 
+    @transaction.atomic
+    def perform_create(self, serializer):
+        """
+        Create user and profile with atomic transaction.
+
+        Ensures that user creation, profile creation, and academy
+        association are executed atomically to maintain data consistency.
+        """
+        try:
+            user = serializer.save()
+            logger.info(
+                f"Successfully created academy user: {user.email} of type: {user.user_type}"
+            )
+        except Exception as e:
+            logger.error(f"Error creating academy user: {str(e)}")
+            raise
+
     @swagger_auto_schema(
         operation_summary="Register a new academy user",
         operation_description="Creates a new user account with user_type in ['coach', 'player', 'parent']",
@@ -120,7 +184,6 @@ class AcademyUserRegistrationView(generics.CreateAPIView):
                     type=openapi.TYPE_OBJECT,
                     properties={
                         "id": openapi.Schema(type=openapi.TYPE_INTEGER),
-                        "username": openapi.Schema(type=openapi.TYPE_STRING),
                         "email": openapi.Schema(type=openapi.TYPE_STRING),
                         "first_name": openapi.Schema(type=openapi.TYPE_STRING),
                         "last_name": openapi.Schema(type=openapi.TYPE_STRING),
@@ -140,10 +203,10 @@ class AcademyUserRegistrationView(generics.CreateAPIView):
 
 class LogoutView(generics.GenericAPIView):
     """
-    API endpoint for user logout.
+    API endpoint for user logout with atomic transaction support.
 
     Blacklists the provided refresh token to prevent further use.
-    Requires authentication.
+    Requires authentication. Token blacklisting is done atomically.
     """
 
     permission_classes = [IsAuthenticated]
@@ -176,16 +239,24 @@ class LogoutView(generics.GenericAPIView):
             401: "Unauthorized - authentication required",
         },
     )
+    @transaction.atomic
     def post(self, request):
+        """
+        Logout user by blacklisting refresh token.
+
+        Uses atomic transaction to ensure token blacklisting
+        is completed successfully or rolled back on error.
+        """
         try:
             refresh_token = request.data["refresh"]
             token = RefreshToken(refresh_token)
             token.blacklist()
+            logger.info(f"User {request.user.id} logged out successfully")
             return Response(
                 {"message": "Successfully logged out"}, status=status.HTTP_200_OK
             )
         except Exception as e:
-            print(e)
+            logger.error(f"Error during logout: {str(e)}")
             return Response(
                 {"error": "Invalid token"}, status=status.HTTP_400_BAD_REQUEST
             )
@@ -247,10 +318,10 @@ class ProfileView(generics.RetrieveUpdateAPIView):
 
 class ChangePasswordView(generics.UpdateAPIView):
     """
-    API endpoint for changing the current user's password.
+    API endpoint for changing the current user's password with atomic transaction support.
 
     Requires the old password for verification and a new password that meets
-    complexity requirements.
+    complexity requirements. All operations are executed atomically.
     """
 
     serializer_class = ChangePasswordSerializer
@@ -293,27 +364,42 @@ class ChangePasswordView(generics.UpdateAPIView):
             401: "Unauthorized - authentication required",
         },
     )
+    @transaction.atomic
     def update(self, request, *args, **kwargs):
-        user = self.get_object()
-        serializer = self.get_serializer(data=request.data)
+        """
+        Update user password with atomic transaction.
 
-        if serializer.is_valid():
-            # Check old password
-            if not user.check_password(serializer.data.get("old_password")):
+        Ensures password change is executed atomically to
+        maintain data consistency and security.
+        """
+        try:
+            user = self.get_object()
+            serializer = self.get_serializer(data=request.data)
+
+            if serializer.is_valid():
+                # Check old password
+                if not user.check_password(serializer.data.get("old_password")):
+                    return Response(
+                        {"old_password": "Wrong password."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                # Set new password
+                user.set_password(serializer.data.get("new_password"))
+                user.save()
+                logger.info(f"Password changed for user {user.id}")
+
                 return Response(
-                    {"old_password": "Wrong password."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"message": "Password updated successfully"},
+                    status=status.HTTP_200_OK,
                 )
 
-            # Set new password
-            user.set_password(serializer.data.get("new_password"))
-            user.save()
-
-            return Response(
-                {"message": "Password updated successfully"}, status=status.HTTP_200_OK
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(
+                f"Error changing password for user {request.user.id}: {str(e)}"
             )
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            raise
 
 
 class UserViewSet(BaseModelViewSet):
@@ -333,7 +419,7 @@ class UserViewSet(BaseModelViewSet):
     queryset = User.objects.all()
     serializer_class = BaseUserSerializer
     permission_classes = [IsAuthenticated]
-    search_fields = ["username", "email", "first_name", "last_name"]
+    search_fields = ["email", "first_name", "last_name"]
     filterset_fields = ["user_type", "is_active"]
     ordering = ["-date_joined"]
 
@@ -473,10 +559,10 @@ class UserViewSet(BaseModelViewSet):
 
 class AcademyUserViewSet(BaseModelViewSet):
     """
-    API endpoints for academy administrators to manage users in their academy.
+    API endpoints for academy administrators to manage users in their academy with atomic transaction support.
 
     Allows academy admins to list, create, update, and delete coach, player, and parent users
-    that belong to their academy.
+    that belong to their academy. All database operations are executed atomically.
 
     list: Returns a paginated list of users in the admin's academy
     retrieve: Returns details of a specific user in the admin's academy
@@ -492,7 +578,7 @@ class AcademyUserViewSet(BaseModelViewSet):
     """
 
     permission_classes = [IsAuthenticated, IsAcademyAdmin]
-    search_fields = ["username", "email", "first_name", "last_name"]
+    search_fields = ["email", "first_name", "last_name"]
     filterset_fields = ["user_type", "is_active"]
     ordering = ["-date_joined"]
 
@@ -618,15 +704,21 @@ class AcademyUserViewSet(BaseModelViewSet):
             404: "Not found - user does not exist",
         },
     )
+    @transaction.atomic
     @action(detail=True, methods=["post"])
     def activate(self, request, pk=None):
         """
-        Activate a user in the admin's academy.
+        Activate a user in the admin's academy with atomic transaction.
         """
-        user = self.get_object()
-        user.is_active = True
-        user.save()
-        return Response({"status": "User activated"})
+        try:
+            user = self.get_object()
+            user.is_active = True
+            user.save()
+            logger.info(f"Activated user {user.id} by admin {request.user.id}")
+            return Response({"status": "User activated"})
+        except Exception as e:
+            logger.error(f"Error activating user {pk}: {str(e)}")
+            raise
 
     @swagger_auto_schema(
         operation_summary="Deactivate an academy user",
@@ -648,15 +740,21 @@ class AcademyUserViewSet(BaseModelViewSet):
             404: "Not found - user does not exist",
         },
     )
+    @transaction.atomic
     @action(detail=True, methods=["post"])
     def deactivate(self, request, pk=None):
         """
-        Deactivate a user in the admin's academy.
+        Deactivate a user in the admin's academy with atomic transaction.
         """
-        user = self.get_object()
-        user.is_active = False
-        user.save()
-        return Response({"status": "User deactivated"})
+        try:
+            user = self.get_object()
+            user.is_active = False
+            user.save()
+            logger.info(f"Deactivated user {user.id} by admin {request.user.id}")
+            return Response({"status": "User deactivated"})
+        except Exception as e:
+            logger.error(f"Error deactivating user {pk}: {str(e)}")
+            raise
 
     @swagger_auto_schema(
         operation_summary="Reset an academy user's password",
@@ -688,24 +786,27 @@ class AcademyUserViewSet(BaseModelViewSet):
             404: "Not found - user does not exist",
         },
     )
+    @transaction.atomic
     @action(detail=True, methods=["post"])
     def reset_password(self, request, pk=None):
         """
-        Reset password for a user in the admin's academy.
+        Reset password for a user in the admin's academy with atomic transaction.
         """
-        user = self.get_object()
-        new_password = request.data.get("new_password")
-
-        if not new_password:
-            return Response(
-                {"error": "New password is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
+            user = self.get_object()
+            new_password = request.data.get("new_password")
+
+            if not new_password:
+                return Response(
+                    {"error": "New password is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             validate_password(new_password, user)
             user.set_password(new_password)
             user.save()
+            logger.info(f"Reset password for user {user.id} by admin {request.user.id}")
             return Response({"status": "Password reset successful"})
         except Exception as e:
+            logger.error(f"Error resetting password for user {pk}: {str(e)}")
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

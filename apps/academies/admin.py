@@ -55,7 +55,7 @@ class AcademyAdminProfileAdmin(AcademyScopedAdmin):
 
     list_display = ["id", "user", "academy", "position", "is_active"]
     list_filter = ["is_active", "academy", "position"]
-    search_fields = ["user__username", "user__email", "position"]
+    search_fields = ["user__email", "user__first_name", "user__last_name", "position"]
     raw_id_fields = ["user", "academy"]
 
 
@@ -72,7 +72,12 @@ class CoachProfileAdmin(AcademyScopedAdmin):
         "is_active",
     ]
     list_filter = ["is_active", "academy", "specialization", "experience_years"]
-    search_fields = ["user__username", "user__email", "specialization"]
+    search_fields = [
+        "user__email",
+        "user__first_name",
+        "user__last_name",
+        "specialization",
+    ]
     raw_id_fields = ["user", "academy"]
 
 
@@ -90,7 +95,12 @@ class PlayerProfileAdmin(AcademyScopedAdmin):
         "is_active",
     ]
     list_filter = ["is_active", "academy", "position", "dominant_foot"]
-    search_fields = ["user__username", "user__email", "jersey_number"]
+    search_fields = [
+        "user__email",
+        "user__first_name",
+        "user__last_name",
+        "jersey_number",
+    ]
     raw_id_fields = ["user", "academy"]
 
 
@@ -100,7 +110,7 @@ class ParentProfileAdmin(BaseModelAdmin):
 
     list_display = ["id", "user", "relationship", "is_active"]
     list_filter = ["is_active", "relationship"]
-    search_fields = ["user__username", "user__email"]
+    search_fields = ["user__email", "user__first_name", "user__last_name"]
     raw_id_fields = ["user"]
     filter_horizontal = ["children"]
 
@@ -111,5 +121,10 @@ class ExternalClientProfileAdmin(BaseModelAdmin):
 
     list_display = ["id", "user", "organization", "is_active"]
     list_filter = ["is_active"]
-    search_fields = ["user__username", "user__email", "organization"]
+    search_fields = [
+        "user__email",
+        "user__first_name",
+        "user__last_name",
+        "organization",
+    ]
     raw_id_fields = ["user"]
