@@ -36,6 +36,10 @@ class Field(BaseModel):
     facilities = models.JSONField(default=dict)  # lights, changing rooms, etc.
     is_available = models.BooleanField(default=True)
 
+    def __str__(self):
+        """Return string representation of the field."""
+        return f"{self.name} - {self.academy.name}"
+
 
 class FieldBooking(BaseModel):
     """
@@ -75,6 +79,62 @@ class FieldBooking(BaseModel):
     match = models.OneToOneField(
         "matches.Match", on_delete=models.CASCADE, null=True, blank=True
     )
+
+    def save(self, *args, **kwargs):
+        """Auto-calculate total_cost before saving."""
+        if not self.total_cost:
+            self.total_cost = self.calculate_total_cost()
+        super().save(*args, **kwargs)
+
+    def calculate_total_cost(self):
+        """Calculate the total cost based on duration and hourly rate."""
+        from decimal import Decimal
+
+        if self.start_time and self.end_time and self.field:
+            duration_hours = Decimal(str(self.duration_hours))
+            return self.field.hourly_rate * duration_hours
+        return Decimal("0.00")
+
+    @property
+    def duration_hours(self):
+        """Calculate booking duration in hours."""
+        if self.start_time and self.end_time:
+            duration = self.end_time - self.start_time
+            return duration.total_seconds() / 3600
+        return 0
+
+    @property
+    def can_cancel(self):
+        """Check if booking can be cancelled."""
+        from django.utils import timezone
+
+        return self.start_time > timezone.now() and self.status not in [
+            "cancelled",
+            "completed",
+        ]
+
+    @property
+    def can_modify(self):
+        """Check if booking can be modified."""
+        from django.utils import timezone
+
+        return self.start_time > timezone.now() and self.status == "pending"
+
+    def __str__(self):
+        """Return string representation of the field booking."""
+        return f"{self.field.name} - {self.booked_by.email} - {self.start_time.date()}"
+
+    def clean(self):
+        """Validate booking data."""
+        from django.core.exceptions import ValidationError
+        from django.utils import timezone
+
+        if self.start_time and self.end_time:
+            if self.end_time <= self.start_time:
+                raise ValidationError("End time must be after start time")
+
+            if self.start_time < timezone.now():
+                raise ValidationError("Cannot create booking in the past")
 
     class Meta:
         constraints = [

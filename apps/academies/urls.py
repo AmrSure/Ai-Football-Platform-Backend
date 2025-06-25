@@ -7,8 +7,9 @@ app_name = "academies"
 
 # Router for academy management
 router = DefaultRouter()
-router.register(r"academies", views.AcademyViewSet)
+router.register(r"academy", views.AcademyViewSet, basename="academy")
 router.register(r"academy-admins", views.AcademyAdminProfileViewSet)
+router.register(r"external-clients", views.ExternalClientProfileViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),

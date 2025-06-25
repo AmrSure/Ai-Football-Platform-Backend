@@ -75,3 +75,12 @@ class Team(BaseModel):
     )
     age_group = models.CharField(max_length=20)  # U-16, U-18, Senior, etc.
     formation = models.CharField(max_length=20, blank=True)  # 4-4-2, 3-5-2, etc.
+
+    def __str__(self):
+        """Return string representation of the team."""
+        return f"{self.name} - {self.academy.name}"
+
+    @property
+    def total_players(self):
+        """Get total number of players in the team."""
+        return self.players.filter(is_active=True).count()

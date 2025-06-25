@@ -29,7 +29,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     using appropriate nested serializers based on user type.
 
     Fields:
-    - email: User's email for authentication
+    - username: User's email for authentication (standard JWT field name)
     - password: User's password for authentication
 
     Returns:
@@ -171,24 +171,10 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
 
-        # Create appropriate profile based on user type
-        self.create_user_profile(user)
+        # Profile will be created automatically by signals
+        # No need to manually create profile here
 
         return user
-
-    def create_user_profile(self, user):
-        """Create user profile based on user type"""
-        profile_classes = {
-            "academy_admin": AcademyAdminProfile,
-            "coach": CoachProfile,
-            "player": PlayerProfile,
-            "parent": ParentProfile,
-            "external_client": ExternalClientProfile,
-        }
-
-        profile_class = profile_classes.get(user.user_type)
-        if profile_class:
-            profile_class.objects.create(user=user)
 
 
 class AcademyUserRegistrationSerializer(serializers.ModelSerializer):
@@ -244,13 +230,14 @@ class AcademyUserRegistrationSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
 
-        # Create profile with academy association
-        self.create_user_profile(user, academy_id)
+        # Profile will be created automatically by signals
+        # Now update the profile with academy association
+        self.associate_profile_with_academy(user, academy_id)
 
         return user
 
-    def create_user_profile(self, user, academy_id):
-        """Create user profile based on user type with academy association"""
+    def associate_profile_with_academy(self, user, academy_id):
+        """Associate user profile with academy after creation"""
         from apps.academies.models import Academy
 
         try:
@@ -258,15 +245,13 @@ class AcademyUserRegistrationSerializer(serializers.ModelSerializer):
         except Academy.DoesNotExist:
             raise serializers.ValidationError({"academy_id": "Academy not found"})
 
-        profile_classes = {
-            "coach": CoachProfile,
-            "player": PlayerProfile,
-            "parent": ParentProfile,
-        }
-
-        profile_class = profile_classes.get(user.user_type)
-        if profile_class:
-            profile_class.objects.create(user=user, academy=academy)
+        # Wait for profile to be created by signal, then update with academy
+        if hasattr(user, "profile") and user.profile:
+            profile = user.profile
+            # Check if the profile model has academy field
+            if hasattr(profile, "academy"):
+                profile.academy = academy
+                profile.save()
 
 
 class AcademyUserUpdateSerializer(serializers.ModelSerializer):

@@ -17,11 +17,12 @@ from rest_framework.response import Response
 from apps.core.permissions import IsAcademyAdmin, IsSystemAdmin
 from apps.core.views import BaseModelViewSet
 
-from .models import Academy, AcademyAdminProfile
+from .models import Academy, AcademyAdminProfile, ExternalClientProfile
 from .serializers import (
     AcademyAdminProfileSerializer,
     AcademyDetailSerializer,
     AcademySerializer,
+    ExternalClientProfileSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -520,3 +521,148 @@ class AcademyAdminProfileViewSet(BaseModelViewSet):
     )
     def destroy(self, request, *args, **kwargs):
         return super().destroy(request, *args, **kwargs)
+
+
+class ExternalClientProfileViewSet(BaseModelViewSet):
+    """
+    API endpoints for managing external client profiles with atomic transaction support.
+
+    list: Returns a paginated list of external client profiles
+    retrieve: Returns details of a specific external client profile
+    create: Creates a new external client profile
+    update: Updates external client profile data
+    partial_update: Partially updates external client profile data
+    destroy: Deletes an external client profile
+
+    All database operations are executed atomically to ensure data consistency.
+    """
+
+    queryset = ExternalClientProfile.objects.all()
+    serializer_class = ExternalClientProfileSerializer
+    permission_classes = [IsAuthenticated]
+    search_fields = [
+        "user__email",
+        "user__first_name",
+        "user__last_name",
+        "organization",
+    ]
+    filterset_fields = ["is_active"]
+    ordering = ["-created_at"]
+
+    def get_permissions(self):
+        """
+        System admins can perform all operations.
+        External clients can only view and update their own profile.
+        Academy users cannot access external client profiles.
+        """
+        if self.action in ["create"]:
+            # Anyone can create an external client profile (self-registration)
+            self.permission_classes = [IsAuthenticated]
+        elif self.action in ["list"]:
+            # Only system admins can list all external client profiles
+            self.permission_classes = [IsAuthenticated, IsSystemAdmin]
+        else:
+            # For retrieve, update, partial_update, destroy - check ownership or admin
+            self.permission_classes = [IsAuthenticated]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        """
+        Return profiles based on user permissions.
+        System admins can see all profiles.
+        External clients can only see their own profile.
+        """
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        if user.user_type == "system_admin":
+            # System admins can see all external client profiles
+            return queryset
+        elif user.user_type == "external_client" and hasattr(user, "profile"):
+            # External clients can only see their own profile
+            return queryset.filter(user=user)
+        else:
+            # Other user types cannot access external client profiles
+            return queryset.none()
+
+    @swagger_auto_schema(
+        operation_summary="List external client profiles",
+        operation_description="Returns a paginated list of external client profiles (system admin only)",
+        responses={
+            200: "List of external client profiles",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - only system administrators can list all profiles",
+        },
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Retrieve external client profile details",
+        operation_description="Returns details of a specific external client profile",
+        responses={
+            200: "External client profile details",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user does not have access to this profile",
+            404: "Not found - profile does not exist",
+        },
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Create new external client profile",
+        operation_description="Creates a new external client profile with nested user creation",
+        responses={
+            201: "External client profile created successfully",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+        },
+    )
+    def create(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().create(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Update external client profile",
+        operation_description="Updates external client profile data",
+        responses={
+            200: "External client profile updated successfully",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user does not have access to this profile",
+            404: "Not found - profile does not exist",
+        },
+    )
+    def update(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().update(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Partially update external client profile",
+        operation_description="Partially updates external client profile data",
+        responses={
+            200: "External client profile updated successfully",
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user does not have access to this profile",
+            404: "Not found - profile does not exist",
+        },
+    )
+    def partial_update(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().partial_update(request, *args, **kwargs)
+
+    @swagger_auto_schema(
+        operation_summary="Delete external client profile",
+        operation_description="Deletes an external client profile",
+        responses={
+            204: "No content - profile deleted successfully",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user does not have access to this profile",
+            404: "Not found - profile does not exist",
+        },
+    )
+    def destroy(self, request, *args, **kwargs):
+        with transaction.atomic():
+            return super().destroy(request, *args, **kwargs)

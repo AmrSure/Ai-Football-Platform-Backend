@@ -29,6 +29,81 @@ class Academy(BaseModel):
     website = models.URLField(blank=True)
     established_date = models.DateField(null=True, blank=True)
 
+    def __str__(self):
+        """Return string representation of the academy."""
+        return self.name
+
+    @property
+    def basic_statistics(self):
+        """Get basic statistics for the academy."""
+        return {
+            "total_coaches": self.coaches.filter(is_active=True).count(),
+            "total_players": self.players.filter(is_active=True).count(),
+            "total_teams": self.teams.filter(is_active=True).count(),
+            "total_fields": self.fields.filter(is_active=True).count(),
+        }
+
+    @property
+    def statistics(self):
+        """Get comprehensive statistics for the academy."""
+        # Get active counts
+        active_coaches = self.coaches.filter(is_active=True)
+        active_players = self.players.filter(is_active=True)
+        active_teams = (
+            self.teams.filter(is_active=True) if hasattr(self, "teams") else []
+        )
+        active_fields = self.fields.filter(is_active=True)
+
+        # Build detailed statistics similar to AcademyDetailSerializer
+        stats = {
+            "total_coaches": active_coaches.count(),
+            "total_players": active_players.count(),
+            "total_teams": len(active_teams)
+            if hasattr(active_teams, "__len__")
+            else active_teams.count(),
+            "total_fields": active_fields.count(),
+            "coaches_by_specialization": self._get_coaches_by_specialization(
+                active_coaches
+            ),
+            "players_by_position": self._get_players_by_position(active_players),
+            "teams_by_age_group": self._get_teams_by_age_group(active_teams),
+            "fields_by_type": self._get_fields_by_type(active_fields),
+        }
+
+        return stats
+
+    def _get_coaches_by_specialization(self, coaches):
+        """Group coaches by specialization."""
+        specializations = {}
+        for coach in coaches:
+            spec = coach.specialization or "Not Specified"
+            specializations[spec] = specializations.get(spec, 0) + 1
+        return specializations
+
+    def _get_players_by_position(self, players):
+        """Group players by position."""
+        positions = {}
+        for player in players:
+            pos = player.position or "Not Specified"
+            positions[pos] = positions.get(pos, 0) + 1
+        return positions
+
+    def _get_teams_by_age_group(self, teams):
+        """Group teams by age group."""
+        age_groups = {}
+        for team in teams:
+            age_group = team.age_group or "Not Specified"
+            age_groups[age_group] = age_groups.get(age_group, 0) + 1
+        return age_groups
+
+    def _get_fields_by_type(self, fields):
+        """Group fields by type."""
+        field_types = {}
+        for field in fields:
+            field_type = field.field_type if field.field_type else "Not Specified"
+            field_types[field_type] = field_types.get(field_type, 0) + 1
+        return field_types
+
     class Meta:
         verbose_name_plural = "Academies"
         db_table = "academies_academy"
@@ -49,7 +124,7 @@ class AcademyAdminProfile(UserProfile):
     """
 
     academy = models.ForeignKey(
-        Academy, on_delete=models.CASCADE, related_name="admins"
+        Academy, on_delete=models.CASCADE, related_name="admins", null=True, blank=True
     )
     position = models.CharField(max_length=100, blank=True)
 
@@ -70,7 +145,7 @@ class CoachProfile(UserProfile):
     """
 
     academy = models.ForeignKey(
-        Academy, on_delete=models.CASCADE, related_name="coaches"
+        Academy, on_delete=models.CASCADE, related_name="coaches", null=True, blank=True
     )
     specialization = models.CharField(max_length=100, blank=True)
     experience_years = models.PositiveIntegerField(default=0)
@@ -96,7 +171,7 @@ class PlayerProfile(UserProfile):
     """
 
     academy = models.ForeignKey(
-        Academy, on_delete=models.CASCADE, related_name="players"
+        Academy, on_delete=models.CASCADE, related_name="players", null=True, blank=True
     )
     jersey_number = models.PositiveIntegerField(null=True, blank=True)
     position = models.CharField(max_length=50, blank=True)

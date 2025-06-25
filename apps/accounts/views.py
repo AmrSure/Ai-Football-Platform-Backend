@@ -461,8 +461,8 @@ class UserViewSet(BaseModelViewSet):
     ordering = ["-date_joined"]
 
     def get_permissions(self):
-        if self.action in ["create", "update", "partial_update", "destroy"]:
-            self.permission_classes = [IsSystemAdmin]
+        # Only system admins can access this viewset
+        self.permission_classes = [IsSystemAdmin]
         return super().get_permissions()
 
     @swagger_auto_schema(
@@ -637,15 +637,28 @@ class AcademyUserViewSet(BaseModelViewSet):
             return User.objects.none()
 
         academy = self.request.user.profile.academy
+        if academy is None:
+            return User.objects.none()
 
         # Get all users with profiles in this academy
-        # This query finds users who have a profile (coach, player, parent) in the admin's academy
-        return User.objects.filter(
-            Q(user_type__in=["coach", "player", "parent"]),
-            Q(profile__coach__academy=academy)
-            | Q(profile__player__academy=academy)
-            | Q(profile__parent__academy=academy),
-        ).distinct()
+        # Import the profile models to check academy relationships
+        from apps.academies.models import CoachProfile, ParentProfile, PlayerProfile
+
+        # Get users with academy-related profiles
+        coach_users = User.objects.filter(
+            user_type="coach", profile__in=CoachProfile.objects.filter(academy=academy)
+        )
+        player_users = User.objects.filter(
+            user_type="player",
+            profile__in=PlayerProfile.objects.filter(academy=academy),
+        )
+        parent_users = User.objects.filter(
+            user_type="parent",
+            profile__in=ParentProfile.objects.filter(children__academy=academy),
+        )
+
+        # Combine all querysets
+        return (coach_users | player_users | parent_users).distinct()
 
     def get_permissions(self):
         """

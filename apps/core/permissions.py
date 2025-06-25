@@ -44,18 +44,19 @@ class IsSystemAdmin(permissions.BasePermission):
 
 
 class IsAcademyAdmin(permissions.BasePermission):
-    """Permission for academy admins."""
+    """Permission for academy admins and system admins."""
 
     def has_permission(self, request, view):
         """
-        Check if user is an academy admin.
+        Check if user is an academy admin or system admin.
 
         Returns:
-            bool: True if user is authenticated and an academy admin
+            bool: True if user is authenticated and an academy admin or system admin
         """
-        return (
-            request.user.is_authenticated and request.user.user_type == "academy_admin"
-        )
+        return request.user.is_authenticated and request.user.user_type in [
+            "academy_admin",
+            "system_admin",
+        ]
 
 
 class IsAcademyAdminForUser(permissions.BasePermission):

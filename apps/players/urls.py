@@ -7,11 +7,11 @@ app_name = "players"
 
 # Router for player management
 router = DefaultRouter()
-router.register(r"players", views.PlayerProfileViewSet)
-router.register(r"coaches", views.CoachProfileViewSet)
-router.register(r"parents", views.ParentProfileViewSet)
-router.register(r"teams", views.TeamViewSet)
+router.register(r"playerprofile", views.PlayerProfileViewSet, basename="playerprofile")
+router.register(r"coachprofile", views.CoachProfileViewSet, basename="coachprofile")
+router.register(r"parentprofile", views.ParentProfileViewSet, basename="parentprofile")
+router.register(r"team", views.TeamViewSet, basename="team")
 
 urlpatterns = [
-    path("", include(router.urls)),
+    path("players/", include(router.urls)),
 ]

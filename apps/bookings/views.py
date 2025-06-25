@@ -245,7 +245,7 @@ class FieldViewSet(AcademyScopedViewSet):
 
     @swagger_auto_schema(
         operation_summary="Get field utilization statistics",
-        operation_description="Get utilization statistics for a specific field",
+        operation_description="Get comprehensive utilization statistics for a specific field",
         manual_parameters=[
             openapi.Parameter(
                 "start_date",
@@ -261,6 +261,14 @@ class FieldViewSet(AcademyScopedViewSet):
                 type=openapi.TYPE_STRING,
                 required=False,
             ),
+            openapi.Parameter(
+                "period",
+                openapi.IN_QUERY,
+                description="Time period for grouping (daily, weekly, monthly, yearly)",
+                type=openapi.TYPE_STRING,
+                required=False,
+                default="monthly",
+            ),
         ],
         responses={
             200: openapi.Response(
@@ -268,12 +276,66 @@ class FieldViewSet(AcademyScopedViewSet):
                 schema=openapi.Schema(
                     type=openapi.TYPE_OBJECT,
                     properties={
-                        "total_booked_hours": openapi.Schema(type=openapi.TYPE_NUMBER),
-                        "total_available_hours": openapi.Schema(
-                            type=openapi.TYPE_NUMBER
+                        "field_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "field_name": openapi.Schema(type=openapi.TYPE_STRING),
+                        "period": openapi.Schema(type=openapi.TYPE_STRING),
+                        "date_range": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                "start_date": openapi.Schema(type=openapi.TYPE_STRING),
+                                "end_date": openapi.Schema(type=openapi.TYPE_STRING),
+                            },
                         ),
-                        "utilization_rate": openapi.Schema(type=openapi.TYPE_NUMBER),
-                        "booking_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "utilization_stats": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                "total_hours_available": openapi.Schema(
+                                    type=openapi.TYPE_NUMBER
+                                ),
+                                "total_hours_booked": openapi.Schema(
+                                    type=openapi.TYPE_NUMBER
+                                ),
+                                "total_bookings": openapi.Schema(
+                                    type=openapi.TYPE_INTEGER
+                                ),
+                                "utilization_rate": openapi.Schema(
+                                    type=openapi.TYPE_NUMBER
+                                ),
+                                "average_booking_duration": openapi.Schema(
+                                    type=openapi.TYPE_NUMBER
+                                ),
+                                "peak_hours": openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(type=openapi.TYPE_STRING),
+                                ),
+                                "least_busy_hours": openapi.Schema(
+                                    type=openapi.TYPE_ARRAY,
+                                    items=openapi.Schema(type=openapi.TYPE_STRING),
+                                ),
+                            },
+                        ),
+                        "revenue_stats": openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                "total_revenue": openapi.Schema(
+                                    type=openapi.TYPE_STRING
+                                ),
+                                "average_revenue_per_booking": openapi.Schema(
+                                    type=openapi.TYPE_STRING
+                                ),
+                                "average_revenue_per_hour": openapi.Schema(
+                                    type=openapi.TYPE_STRING
+                                ),
+                                "projected_monthly_revenue": openapi.Schema(
+                                    type=openapi.TYPE_STRING
+                                ),
+                            },
+                        ),
+                        "booking_trends": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                        ),
+                        "user_type_breakdown": openapi.Schema(type=openapi.TYPE_OBJECT),
                     },
                 ),
             ),
@@ -288,22 +350,176 @@ class FieldViewSet(AcademyScopedViewSet):
         """
         field = self.get_object()
 
-        # Get date range from query params
+        # Get date range and period from query params
+        from decimal import Decimal
+
         from django.utils.dateparse import parse_date
 
         start_date = request.query_params.get("start_date")
         end_date = request.query_params.get("end_date")
+        period = request.query_params.get("period", "monthly")
 
         if start_date:
             start_date = parse_date(start_date)
         if end_date:
             end_date = parse_date(end_date)
 
-        stats = BookingStatisticsCalculator.get_field_utilization_rate(
+        # Get basic utilization stats
+        basic_stats = BookingStatisticsCalculator.get_field_utilization_rate(
             field=field, start_date=start_date, end_date=end_date
         )
 
-        return Response(stats)
+        # Get booking queryset for detailed stats
+        queryset = field.bookings.filter(status__in=["confirmed", "completed"])
+        if start_date:
+            queryset = queryset.filter(start_time__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(start_time__date__lte=end_date)
+
+        # Calculate revenue stats
+        revenue_aggregates = queryset.aggregate(
+            total_revenue=Sum("total_cost"),
+            average_revenue_per_booking=Avg("total_cost"),
+        )
+
+        total_revenue = float(revenue_aggregates["total_revenue"] or 0)
+        avg_revenue_per_booking = float(
+            revenue_aggregates["average_revenue_per_booking"] or 0
+        )
+        avg_revenue_per_hour = float(field.hourly_rate)
+
+        # Calculate booking trends based on period
+        booking_trends = []
+        if period == "weekly" and start_date and end_date:
+            current_date = start_date
+            week_num = 1
+            while current_date <= end_date:
+                week_end = min(current_date + timedelta(days=6), end_date)
+                week_queryset = queryset.filter(
+                    start_time__date__gte=current_date, start_time__date__lte=week_end
+                )
+                week_bookings = week_queryset.aggregate(
+                    count=Count("id"), revenue=Sum("total_cost")
+                )
+
+                # Calculate total hours manually since duration_hours is a property
+                total_hours = sum(booking.duration_hours for booking in week_queryset)
+
+                total_hours = float(total_hours)
+                week_available_hours = 7 * 14  # 7 days * 14 hours per day
+                week_utilization = (
+                    (total_hours / week_available_hours * 100)
+                    if week_available_hours > 0
+                    else 0
+                )
+
+                booking_trends.append(
+                    {
+                        "week": week_num,
+                        "week_start": current_date.strftime("%Y-%m-%d"),
+                        "bookings": week_bookings["count"] or 0,
+                        "revenue": str(week_bookings["revenue"] or 0),
+                        "utilization": round(week_utilization, 1),
+                    }
+                )
+
+                current_date = week_end + timedelta(days=1)
+                week_num += 1
+
+        # Calculate peak hours
+        peak_hours = []
+        least_busy_hours = []
+        hour_bookings = {}
+
+        if queryset.exists():
+            # Group bookings by hour to find peak times
+            for booking in queryset:
+                hour = booking.start_time.hour
+                hour_key = f"{hour:02d}:00-{(hour + 1):02d}:00"
+                if hour_key not in hour_bookings:
+                    hour_bookings[hour_key] = 0
+                hour_bookings[hour_key] += 1
+
+            # Sort by booking count and get top hours
+            sorted_hours = sorted(
+                hour_bookings.items(), key=lambda x: x[1], reverse=True
+            )
+            peak_hours = [hour for hour, count in sorted_hours[:2]]
+
+            # Calculate least busy hours (opposite of peak hours)
+            least_busy_sorted = sorted(hour_bookings.items(), key=lambda x: x[1])
+            least_busy_hours = [hour for hour, count in least_busy_sorted[:2]]
+
+        # Calculate projected revenue (if we have current data)
+        projected_revenue = total_revenue
+        if period == "monthly" and queryset.exists():
+            if start_date and end_date:
+                days_in_period = (end_date - start_date).days + 1
+                if days_in_period < 30:
+                    # Project to full month
+                    projected_revenue = total_revenue * (30 / days_in_period)
+
+        response_data = {
+            "field_id": field.id,
+            "field_name": field.name,
+            "period": period,
+            "date_range": {
+                "start_date": start_date.strftime("%Y-%m-%d") if start_date else None,
+                "end_date": end_date.strftime("%Y-%m-%d") if end_date else None,
+            },
+            "utilization_stats": {
+                "total_hours_available": basic_stats["total_available_hours"],
+                "total_hours_booked": basic_stats["total_booked_hours"],
+                "total_bookings": basic_stats["booking_count"],
+                "utilization_rate": basic_stats["utilization_rate"],
+                "average_booking_duration": round(
+                    basic_stats["total_booked_hours"] / basic_stats["booking_count"], 1
+                )
+                if basic_stats["booking_count"] > 0
+                else 0,
+                "peak_hours": peak_hours,
+                "least_busy_hours": least_busy_hours,
+            },
+            "revenue_stats": {
+                "total_revenue": f"{total_revenue:.2f}",
+                "average_revenue_per_booking": f"{avg_revenue_per_booking:.2f}",
+                "average_revenue_per_hour": f"{avg_revenue_per_hour:.2f}",
+                "projected_monthly_revenue": f"{projected_revenue:.2f}",
+            },
+        }
+
+        # Add booking trends if available
+        if booking_trends:
+            response_data["booking_trends"] = booking_trends
+
+        # Add user type breakdown
+        user_type_breakdown = {
+            "internal_bookings": {
+                "total": queryset.filter(
+                    booked_by__user_type__in=["coach", "player", "parent"]
+                ).count(),
+                "revenue": str(
+                    queryset.filter(
+                        booked_by__user_type__in=["coach", "player", "parent"]
+                    ).aggregate(revenue=Sum("total_cost"))["revenue"]
+                    or 0
+                ),
+            },
+            "external_bookings": {
+                "total": queryset.filter(
+                    booked_by__user_type="external_client"
+                ).count(),
+                "revenue": str(
+                    queryset.filter(booked_by__user_type="external_client").aggregate(
+                        revenue=Sum("total_cost")
+                    )["revenue"]
+                    or 0
+                ),
+            },
+        }
+        response_data["user_type_breakdown"] = user_type_breakdown
+
+        return Response(response_data)
 
     @swagger_auto_schema(
         operation_summary="Get field schedule",

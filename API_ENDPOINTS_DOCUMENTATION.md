@@ -1014,7 +1014,7 @@ GET /api/v1/coaches/{coach_id}/statistics/
 
 ### 9. **List Parent Profiles**
 ```http
-GET /api/v1/parents/
+GET /api/v1/players/parentprofile/
 ```
 
 **Query Parameters:**

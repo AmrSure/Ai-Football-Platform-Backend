@@ -237,7 +237,7 @@ class BookingEmailService:
         """
         try:
             # Get academy admin email
-            academy_admin = booking.field.academy.academy_admin_profile
+            academy_admin = booking.field.academy.admins.filter(is_active=True).first()
             if not academy_admin or not academy_admin.user.email:
                 logger.warning(
                     f"No academy admin email found for academy {booking.field.academy.name}"
@@ -453,17 +453,30 @@ class BookingStatisticsCalculator:
 
     @staticmethod
     def get_field_utilization_rate(
-        field: Field, start_date: datetime = None, end_date: datetime = None
+        field: Field, start_date=None, end_date=None
     ) -> Dict:
         """
         Calculate field utilization rate.
+        start_date and end_date can be datetime.date or datetime.datetime objects
         """
         queryset = field.bookings.filter(status__in=["confirmed", "completed"])
 
         if start_date:
-            queryset = queryset.filter(start_time__gte=start_date)
+            # Handle both date and datetime objects
+            if hasattr(start_date, "date"):
+                # It's a datetime object, use it directly
+                queryset = queryset.filter(start_time__gte=start_date)
+            else:
+                # It's a date object, filter by date
+                queryset = queryset.filter(start_time__date__gte=start_date)
         if end_date:
-            queryset = queryset.filter(start_time__lte=end_date)
+            # Handle both date and datetime objects
+            if hasattr(end_date, "date"):
+                # It's a datetime object, use it directly
+                queryset = queryset.filter(start_time__lte=end_date)
+            else:
+                # It's a date object, filter by date
+                queryset = queryset.filter(start_time__date__lte=end_date)
 
         # Calculate total booked hours
         total_booked_seconds = sum(
@@ -474,7 +487,16 @@ class BookingStatisticsCalculator:
 
         # Calculate available hours (assuming 14 hours per day, 8 AM to 10 PM)
         if start_date and end_date:
-            days = (end_date.date() - start_date.date()).days + 1
+            # Handle both datetime.date and datetime.datetime objects
+            if hasattr(start_date, "date"):
+                start_date_obj = start_date.date()
+            else:
+                start_date_obj = start_date
+            if hasattr(end_date, "date"):
+                end_date_obj = end_date.date()
+            else:
+                end_date_obj = end_date
+            days = (end_date_obj - start_date_obj).days + 1
         else:
             days = 30  # Default to 30 days
 

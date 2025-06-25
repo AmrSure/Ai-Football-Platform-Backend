@@ -30,6 +30,11 @@ def calculate_age(birth_date):
     from datetime import date
 
     today = date.today()
+
+    # Handle future dates gracefully
+    if birth_date > today:
+        return 0
+
     return (
         today.year
         - birth_date.year

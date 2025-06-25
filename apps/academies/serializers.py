@@ -1,3 +1,5 @@
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
 from apps.core.serializers import BaseUserSerializer
@@ -10,6 +12,50 @@ from .models import (
     ParentProfile,
     PlayerProfile,
 )
+
+User = get_user_model()
+
+
+class UserCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating users nested within profile creation."""
+
+    password = serializers.CharField(write_only=True, validators=[validate_password])
+    password_confirm = serializers.CharField(write_only=True, required=False)
+
+    class Meta:
+        model = User
+        fields = [
+            "email",
+            "password",
+            "password_confirm",
+            "first_name",
+            "last_name",
+            "user_type",
+            "phone",
+        ]
+        extra_kwargs = {
+            "email": {"required": True},
+            "first_name": {"required": True},
+            "last_name": {"required": True},
+            "user_type": {"required": True},
+        }
+
+    def validate(self, attrs):
+        password = attrs.get("password")
+        password_confirm = attrs.get("password_confirm")
+
+        if password_confirm and password != password_confirm:
+            raise serializers.ValidationError("Password fields didn't match.")
+
+        return attrs
+
+    def create(self, validated_data):
+        validated_data.pop("password_confirm", None)
+        password = validated_data.pop("password")
+        user = User.objects.create_user(**validated_data)
+        user.set_password(password)
+        user.save()
+        return user
 
 
 class CoachProfileNestedSerializer(serializers.ModelSerializer):
@@ -159,7 +205,7 @@ class AcademyDetailSerializer(serializers.ModelSerializer):
     coaches = CoachProfileNestedSerializer(many=True, read_only=True)
     players = PlayerProfileNestedSerializer(many=True, read_only=True)
     teams = serializers.SerializerMethodField()
-    fields = serializers.SerializerMethodField()
+    academy_fields = serializers.SerializerMethodField()
 
     # Statistics
     statistics = serializers.SerializerMethodField()
@@ -184,7 +230,7 @@ class AcademyDetailSerializer(serializers.ModelSerializer):
             "coaches",
             "players",
             "teams",
-            "fields",
+            "academy_fields",
             "statistics",
         ]
 
@@ -244,7 +290,7 @@ class AcademyDetailSerializer(serializers.ModelSerializer):
         except Exception:
             return []
 
-    def get_fields(self, obj):
+    def get_academy_fields(self, obj):
         """Get fields information for the academy."""
         try:
             fields_data = []
@@ -307,7 +353,7 @@ class AcademyDetailSerializer(serializers.ModelSerializer):
         active_coaches = obj.coaches.filter(is_active=True)
         active_players = obj.players.filter(is_active=True)
         try:
-            active_teams = getattr(obj, "teams", obj.team_set).filter(is_active=True)
+            active_teams = obj.teams.filter(is_active=True)
         except Exception:
             active_teams = []
         active_fields = obj.fields.filter(is_active=True)
@@ -408,19 +454,19 @@ class AcademySerializer(serializers.ModelSerializer):
         return {
             "total_coaches": obj.coaches.filter(is_active=True).count(),
             "total_players": obj.players.filter(is_active=True).count(),
-            "total_teams": getattr(obj, "teams", obj.team_set)
-            .filter(is_active=True)
-            .count(),
+            "total_teams": obj.teams.filter(is_active=True).count(),
             "total_fields": obj.fields.filter(is_active=True).count(),
         }
 
 
 class AcademyAdminProfileSerializer(serializers.ModelSerializer):
     """
-    Serializer for academy admin profiles.
+    Serializer for academy admin profiles with nested user creation.
     """
 
-    user = BaseUserSerializer(read_only=True)
+    user = UserCreateSerializer(required=False)
+    user_email = serializers.CharField(source="user.email", read_only=True)
+    user_name = serializers.CharField(source="user.get_full_name", read_only=True)
     academy_name = serializers.CharField(source="academy.name", read_only=True)
 
     class Meta:
@@ -428,6 +474,8 @@ class AcademyAdminProfileSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "user",
+            "user_email",
+            "user_name",
             "academy",
             "academy_name",
             "position",
@@ -437,4 +485,125 @@ class AcademyAdminProfileSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["user", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        # If user data is provided, ensure user_type is 'academy_admin'
+        user_data = attrs.get("user")
+        if user_data:
+            user_data["user_type"] = "academy_admin"
+
+        return attrs
+
+    def create(self, validated_data):
+        user_data = validated_data.pop("user", None)
+
+        if user_data:
+            # Create user with nested data
+            user_serializer = UserCreateSerializer(data=user_data)
+            user_serializer.is_valid(raise_exception=True)
+            user = user_serializer.save()
+            validated_data["user"] = user
+
+            # Check if profile already exists (due to signals)
+            try:
+                # Try to get existing profile created by signal
+                existing_profile = AcademyAdminProfile.objects.get(user=user)
+                # Update existing profile with our data
+                for key, value in validated_data.items():
+                    if key != "user":  # Don't overwrite user
+                        setattr(existing_profile, key, value)
+                existing_profile.save()
+                return existing_profile
+            except AcademyAdminProfile.DoesNotExist:
+                # Profile doesn't exist, create new one
+                pass
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop("user", None)
+
+        if user_data:
+            # Update user data if provided
+            user_serializer = UserCreateSerializer(
+                instance.user, data=user_data, partial=True
+            )
+            user_serializer.is_valid(raise_exception=True)
+            user_serializer.save()
+
+        return super().update(instance, validated_data)
+
+
+class ExternalClientProfileSerializer(serializers.ModelSerializer):
+    """
+    Serializer for external client profiles with nested user creation.
+    """
+
+    user = UserCreateSerializer(required=False)
+    user_email = serializers.CharField(source="user.email", read_only=True)
+    user_name = serializers.CharField(source="user.get_full_name", read_only=True)
+
+    class Meta:
+        model = ExternalClientProfile
+        fields = [
+            "id",
+            "user",
+            "user_email",
+            "user_name",
+            "organization",
+            "preferred_sports",
+            "bio",
+            "date_of_birth",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        # If user data is provided, ensure user_type is 'external_client'
+        user_data = attrs.get("user")
+        if user_data:
+            user_data["user_type"] = "external_client"
+
+        return attrs
+
+    def create(self, validated_data):
+        user_data = validated_data.pop("user", None)
+
+        if user_data:
+            # Create user with nested data
+            user_serializer = UserCreateSerializer(data=user_data)
+            user_serializer.is_valid(raise_exception=True)
+            user = user_serializer.save()
+            validated_data["user"] = user
+
+            # Check if profile already exists (due to signals)
+            try:
+                # Try to get existing profile created by signal
+                existing_profile = ExternalClientProfile.objects.get(user=user)
+                # Update existing profile with our data
+                for key, value in validated_data.items():
+                    if key != "user":  # Don't overwrite user
+                        setattr(existing_profile, key, value)
+                existing_profile.save()
+                return existing_profile
+            except ExternalClientProfile.DoesNotExist:
+                # Profile doesn't exist, create new one
+                pass
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        user_data = validated_data.pop("user", None)
+
+        if user_data:
+            # Update user data if provided
+            user_serializer = UserCreateSerializer(
+                instance.user, data=user_data, partial=True
+            )
+            user_serializer.is_valid(raise_exception=True)
+            user_serializer.save()
+
+        return super().update(instance, validated_data)

@@ -23,6 +23,7 @@ from .serializers import (
     CoachProfileSerializer,
     ParentProfileSerializer,
     PlayerProfileSerializer,
+    TeamDetailSerializer,
     TeamSerializer,
 )
 
@@ -53,7 +54,7 @@ class PlayerProfileViewSet(AcademyScopedViewSet):
         "position",
         "academy__name",
     ]
-    filterset_fields = ["academy", "position", "is_active", "team"]
+    filterset_fields = ["academy", "position", "is_active", "teams"]
     ordering = ["user__first_name", "user__last_name"]
 
     def get_permissions(self):
@@ -62,7 +63,14 @@ class PlayerProfileViewSet(AcademyScopedViewSet):
         System admins can manage all players.
         Players and parents can view player profiles.
         """
-        if self.action in ["create", "update", "partial_update", "destroy"]:
+        if self.action in [
+            "create",
+            "update",
+            "partial_update",
+            "destroy",
+            "add_parent",
+            "remove_parent",
+        ]:
             self.permission_classes = [IsAuthenticated, IsAcademyAdmin]
         return super().get_permissions()
 
@@ -154,6 +162,201 @@ class PlayerProfileViewSet(AcademyScopedViewSet):
 
         logger.info(f"Retrieved statistics for player {player.id}")
         return Response(stats)
+
+    @swagger_auto_schema(
+        operation_summary="Get player's parents",
+        operation_description="Returns parents associated with a specific player",
+        responses={
+            200: "List of player's parents",
+            401: "Unauthorized - authentication required",
+            404: "Not found - player does not exist",
+        },
+    )
+    @action(detail=True, methods=["get"])
+    def parents(self, request, pk=None):
+        """
+        Get parents for a specific player.
+        """
+        player = self.get_object()
+        parents = player.parents.filter(is_active=True)
+
+        serializer = ParentProfileSerializer(parents, many=True)
+        logger.info(f"Retrieved parents for player {player.id}")
+        return Response(serializer.data)
+
+    @swagger_auto_schema(
+        operation_summary="Add parent to player",
+        operation_description="Associates a parent to the player (academy admin only)",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["parent_id"],
+            properties={
+                "parent_id": openapi.Schema(
+                    type=openapi.TYPE_INTEGER, description="ID of the parent to add"
+                )
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Parent added successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Success message"
+                        ),
+                        "player_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "parent_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    },
+                ),
+            ),
+            400: "Bad request - parent not found or validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not an academy admin",
+            404: "Not found - player does not exist",
+        },
+    )
+    @transaction.atomic
+    @action(detail=True, methods=["post"])
+    def add_parent(self, request, pk=None):
+        """
+        Add a parent to the player.
+        """
+        try:
+            player = self.get_object()
+            parent_id = request.data.get("parent_id")
+
+            if not parent_id:
+                return Response(
+                    {"error": "parent_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                parent = ParentProfile.objects.get(id=parent_id, is_active=True)
+            except ParentProfile.DoesNotExist:
+                return Response(
+                    {"error": "Parent not found or is inactive"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if parent is already associated with this player
+            if player.parents.filter(id=parent.id).exists():
+                return Response(
+                    {"error": "Parent is already associated with this player"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate academy relationship
+            parent_academy = None
+            existing_children = parent.children.filter(academy__isnull=False).first()
+            if existing_children:
+                parent_academy = existing_children.academy
+
+            if parent_academy and player.academy and parent_academy != player.academy:
+                return Response(
+                    {
+                        "error": f"Player's academy ({player.academy.name}) does not match parent's children academy ({parent_academy.name})"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Add the parent (use the parent's children relationship)
+            parent.children.add(player)
+            logger.info(
+                f"Added parent {parent.id} to player {player.id} by admin {request.user.id}"
+            )
+
+            return Response(
+                {
+                    "status": "Parent added to player successfully",
+                    "player_id": player.id,
+                    "parent_id": parent.id,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error adding parent to player {pk}: {str(e)}")
+            raise
+
+    @swagger_auto_schema(
+        operation_summary="Remove parent from player",
+        operation_description="Removes a parent from the player (academy admin only)",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["parent_id"],
+            properties={
+                "parent_id": openapi.Schema(
+                    type=openapi.TYPE_INTEGER, description="ID of the parent to remove"
+                )
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Parent removed successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Success message"
+                        ),
+                        "player_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "parent_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    },
+                ),
+            ),
+            400: "Bad request - parent not found or validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not an academy admin",
+            404: "Not found - player does not exist",
+        },
+    )
+    @transaction.atomic
+    @action(detail=True, methods=["post"])
+    def remove_parent(self, request, pk=None):
+        """
+        Remove a parent from the player.
+        """
+        try:
+            player = self.get_object()
+            parent_id = request.data.get("parent_id")
+
+            if not parent_id:
+                return Response(
+                    {"error": "parent_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                parent = ParentProfile.objects.get(id=parent_id)
+            except ParentProfile.DoesNotExist:
+                return Response(
+                    {"error": "Parent not found"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if parent is actually associated with this player
+            if not player.parents.filter(id=parent.id).exists():
+                return Response(
+                    {"error": "Parent is not associated with this player"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Remove the parent (use the parent's children relationship)
+            parent.children.remove(player)
+            logger.info(
+                f"Removed parent {parent.id} from player {player.id} by admin {request.user.id}"
+            )
+
+            return Response(
+                {
+                    "status": "Parent removed from player successfully",
+                    "player_id": player.id,
+                    "parent_id": parent.id,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error removing parent from player {pk}: {str(e)}")
+            raise
 
 
 class CoachProfileViewSet(AcademyScopedViewSet):
@@ -259,10 +462,32 @@ class ParentProfileViewSet(AcademyScopedViewSet):
         "user__email",
         "user__first_name",
         "user__last_name",
-        "academy__name",
+        "children__academy__name",
     ]
-    filterset_fields = ["academy", "is_active"]
+    filterset_fields = ["children__academy", "is_active"]
     ordering = ["user__first_name", "user__last_name"]
+
+    def get_queryset(self):
+        """
+        Override to handle academy filtering for parent profiles.
+        Parents don't have direct academy relationships - they're linked through their children.
+        """
+        from apps.core.views import BaseModelViewSet
+
+        queryset = BaseModelViewSet.get_queryset(
+            self
+        )  # Skip AcademyScopedViewSet filtering
+        user = self.request.user
+
+        # Apply academy-specific filtering for parents
+        if user.user_type == "system_admin":
+            return queryset
+        elif hasattr(user, "profile") and hasattr(user.profile, "academy"):
+            # For now, show all parents in the system (can be restricted later in production)
+            # This allows academy admins to manage parent-child relationships
+            return queryset
+
+        return queryset.none()
 
     def get_permissions(self):
         """
@@ -270,7 +495,15 @@ class ParentProfileViewSet(AcademyScopedViewSet):
         System admins can manage all parents.
         Parents can view parent profiles.
         """
-        if self.action in ["create", "update", "partial_update", "destroy"]:
+        if self.action in [
+            "create",
+            "update",
+            "partial_update",
+            "destroy",
+            "add_child",
+            "remove_child",
+            "set_children",
+        ]:
             self.permission_classes = [IsAuthenticated, IsAcademyAdmin]
         return super().get_permissions()
 
@@ -315,6 +548,275 @@ class ParentProfileViewSet(AcademyScopedViewSet):
         logger.info(f"Retrieved children for parent {parent.id}")
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        operation_summary="Add child to parent",
+        operation_description="Associates a player as a child of the parent (academy admin only)",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["player_id"],
+            properties={
+                "player_id": openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description="ID of the player to add as child",
+                )
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Child added successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Success message"
+                        ),
+                        "parent_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "child_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    },
+                ),
+            ),
+            400: "Bad request - player not found or validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not an academy admin",
+            404: "Not found - parent does not exist",
+        },
+    )
+    @transaction.atomic
+    @action(detail=True, methods=["post"])
+    def add_child(self, request, pk=None):
+        """
+        Add a child (player) to the parent.
+        """
+        try:
+            parent = self.get_object()
+            player_id = request.data.get("player_id")
+
+            if not player_id:
+                return Response(
+                    {"error": "player_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                player = PlayerProfile.objects.get(id=player_id, is_active=True)
+            except PlayerProfile.DoesNotExist:
+                return Response(
+                    {"error": "Player not found or is inactive"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if player is already a child of this parent
+            if parent.children.filter(id=player.id).exists():
+                return Response(
+                    {"error": "Player is already a child of this parent"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate academy relationship if both have academies
+            parent_academy = None
+            existing_children = parent.children.filter(academy__isnull=False).first()
+            if existing_children:
+                parent_academy = existing_children.academy
+
+            if parent_academy and player.academy and parent_academy != player.academy:
+                return Response(
+                    {
+                        "error": f"Player's academy ({player.academy.name}) does not match parent's children academy ({parent_academy.name})"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Add the child
+            parent.children.add(player)
+            logger.info(
+                f"Added player {player.id} as child to parent {parent.id} by admin {request.user.id}"
+            )
+
+            return Response(
+                {
+                    "status": "Child added to parent successfully",
+                    "parent_id": parent.id,
+                    "child_id": player.id,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error adding child to parent {pk}: {str(e)}")
+            raise
+
+    @swagger_auto_schema(
+        operation_summary="Remove child from parent",
+        operation_description="Removes a player as a child of the parent (academy admin only)",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["player_id"],
+            properties={
+                "player_id": openapi.Schema(
+                    type=openapi.TYPE_INTEGER,
+                    description="ID of the player to remove as child",
+                )
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Child removed successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Success message"
+                        ),
+                        "parent_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "child_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    },
+                ),
+            ),
+            400: "Bad request - player not found or validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not an academy admin",
+            404: "Not found - parent does not exist",
+        },
+    )
+    @transaction.atomic
+    @action(detail=True, methods=["post"])
+    def remove_child(self, request, pk=None):
+        """
+        Remove a child (player) from the parent.
+        """
+        try:
+            parent = self.get_object()
+            player_id = request.data.get("player_id")
+
+            if not player_id:
+                return Response(
+                    {"error": "player_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                player = PlayerProfile.objects.get(id=player_id)
+            except PlayerProfile.DoesNotExist:
+                return Response(
+                    {"error": "Player not found"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if player is actually a child of this parent
+            if not parent.children.filter(id=player.id).exists():
+                return Response(
+                    {"error": "Player is not a child of this parent"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Remove the child
+            parent.children.remove(player)
+            logger.info(
+                f"Removed player {player.id} as child from parent {parent.id} by admin {request.user.id}"
+            )
+
+            return Response(
+                {
+                    "status": "Child removed from parent successfully",
+                    "parent_id": parent.id,
+                    "child_id": player.id,
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error removing child from parent {pk}: {str(e)}")
+            raise
+
+    @swagger_auto_schema(
+        operation_summary="Set parent's children",
+        operation_description="Sets the complete list of children for a parent, replacing existing relationships (academy admin only)",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=["player_ids"],
+            properties={
+                "player_ids": openapi.Schema(
+                    type=openapi.TYPE_ARRAY,
+                    items=openapi.Schema(type=openapi.TYPE_INTEGER),
+                    description="List of player IDs to set as children",
+                )
+            },
+        ),
+        responses={
+            200: openapi.Response(
+                description="Children set successfully",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "status": openapi.Schema(
+                            type=openapi.TYPE_STRING, description="Success message"
+                        ),
+                        "parent_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "children_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    },
+                ),
+            ),
+            400: "Bad request - validation errors",
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - user is not an academy admin",
+            404: "Not found - parent does not exist",
+        },
+    )
+    @transaction.atomic
+    @action(detail=True, methods=["post"])
+    def set_children(self, request, pk=None):
+        """
+        Set the complete list of children for a parent.
+        This replaces all existing parent-child relationships for this parent.
+        """
+        try:
+            parent = self.get_object()
+            player_ids = request.data.get("player_ids", [])
+
+            if not isinstance(player_ids, list):
+                return Response(
+                    {"error": "player_ids must be a list"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate all player IDs exist and are active
+            players = []
+            for player_id in player_ids:
+                try:
+                    player = PlayerProfile.objects.get(id=player_id, is_active=True)
+                    players.append(player)
+                except PlayerProfile.DoesNotExist:
+                    return Response(
+                        {
+                            "error": f"Player with ID {player_id} not found or is inactive"
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Validate academy relationships
+            if players:
+                academy_set = set(
+                    player.academy for player in players if player.academy
+                )
+                if len(academy_set) > 1:
+                    return Response(
+                        {"error": "All children must belong to the same academy"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Set the children (this will clear existing relationships and set new ones)
+            parent.children.set(players)
+            logger.info(
+                f"Set {len(players)} children for parent {parent.id} by admin {request.user.id}"
+            )
+
+            return Response(
+                {
+                    "status": "Children set successfully",
+                    "parent_id": parent.id,
+                    "children_count": len(players),
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error setting children for parent {pk}: {str(e)}")
+            raise
+
 
 class TeamViewSet(AcademyScopedViewSet):
     """
@@ -336,14 +838,21 @@ class TeamViewSet(AcademyScopedViewSet):
     queryset = Team.objects.all()
     serializer_class = TeamSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        """Use TeamDetailSerializer for detail views."""
+        if self.action == "retrieve":
+            return TeamDetailSerializer
+        return TeamSerializer
+
     search_fields = [
         "name",
-        "category",
+        "age_group",
         "academy__name",
         "coach__user__first_name",
         "coach__user__last_name",
     ]
-    filterset_fields = ["academy", "category", "is_active", "coach"]
+    filterset_fields = ["academy", "age_group", "is_active", "coach"]
     ordering = ["name"]
 
     def get_permissions(self):
@@ -408,6 +917,41 @@ class TeamViewSet(AcademyScopedViewSet):
         return Response(serializer.data)
 
     @swagger_auto_schema(
+        operation_summary="Get team statistics",
+        operation_description="Returns statistics for a specific team",
+        responses={
+            200: openapi.Response(
+                description="Team statistics",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "total_players": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "active_players": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "team_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    },
+                ),
+            ),
+            401: "Unauthorized - authentication required",
+            404: "Not found - team does not exist",
+        },
+    )
+    @action(detail=True, methods=["get"])
+    def statistics(self, request, pk=None):
+        """
+        Get statistics for a specific team.
+        """
+        team = self.get_object()
+        stats = {
+            "team_id": team.id,
+            "total_players": team.players.count(),
+            "active_players": team.players.filter(is_active=True).count(),
+            "team_name": team.name,
+            "age_group": team.age_group,
+        }
+        logger.info(f"Retrieved statistics for team {team.id}")
+        return Response(stats)
+
+    @swagger_auto_schema(
         operation_summary="Add player to team",
         operation_description="Adds a player to the team (academy admin only)",
         request_body=openapi.Schema(
@@ -463,14 +1007,13 @@ class TeamViewSet(AcademyScopedViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            if player.team == team:
+            if team in player.teams.all():
                 return Response(
                     {"error": "Player is already in this team"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            player.team = team
-            player.save()
+            player.teams.add(team)
             logger.info(
                 f"Added player {player.id} to team {team.id} by admin {request.user.id}"
             )
@@ -526,15 +1069,14 @@ class TeamViewSet(AcademyScopedViewSet):
                 )
 
             try:
-                player = PlayerProfile.objects.get(id=player_id, team=team)
+                player = PlayerProfile.objects.get(id=player_id, teams=team)
             except PlayerProfile.DoesNotExist:
                 return Response(
                     {"error": "Player not found in this team"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            player.team = None
-            player.save()
+            player.teams.remove(team)
             logger.info(
                 f"Removed player {player.id} from team {team.id} by admin {request.user.id}"
             )

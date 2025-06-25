@@ -159,6 +159,15 @@ class UserProfile(PolymorphicModel, BaseModel):
         """Return string representation of the user profile."""
         return f"{self.user.email} - {self.user.get_user_type_display()}"
 
+    @property
+    def age(self):
+        """Calculate age from date_of_birth."""
+        if self.date_of_birth:
+            from apps.core.utils import calculate_age
+
+            return calculate_age(self.date_of_birth)
+        return None
+
 
 # apps/core/models.py (Additional base classes)
 class TimestampedModel(models.Model):
