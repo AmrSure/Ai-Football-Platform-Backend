@@ -285,7 +285,44 @@ class LogoutView(generics.GenericAPIView):
         is completed successfully or rolled back on error.
         """
         try:
-            refresh_token = request.data["refresh"]
+            # Handle both properly formatted and incorrectly nested refresh tokens
+            if "refresh" in request.data:
+                if (
+                    isinstance(request.data["refresh"], dict)
+                    and "refresh" in request.data["refresh"]
+                ):
+                    # Handle nested refresh token
+                    refresh_token = request.data["refresh"]["refresh"]
+                else:
+                    # Handle properly formatted refresh token
+                    refresh_token = request.data["refresh"]
+            else:
+                return Response(
+                    {"error": "Refresh token is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if the token is a refresh token (not an access token)
+            import jwt
+            from django.conf import settings
+
+            try:
+                # Decode token without verification to check token_type
+                decoded = jwt.decode(refresh_token, options={"verify_signature": False})
+
+                if decoded.get("token_type") != "refresh":
+                    return Response(
+                        {
+                            "error": "Please provide a refresh token, not an access token"
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            except jwt.DecodeError:
+                return Response(
+                    {"error": "Invalid token format"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             token = RefreshToken(refresh_token)
             token.blacklist()
             logger.info(f"User {request.user.id} logged out successfully")
