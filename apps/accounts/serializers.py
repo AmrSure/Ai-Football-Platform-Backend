@@ -315,12 +315,12 @@ class ProfileSerializer(serializers.ModelSerializer):
     The model is set dynamically based on the instance type.
 
     Fields:
-    - user: Basic user information (read-only)
+    - user: Basic user information
     - age: Calculated from date_of_birth if available
     - All other fields from the specific profile model
     """
 
-    user = BaseUserSerializer(read_only=True)
+    user = BaseUserSerializer()
     age = serializers.SerializerMethodField()
 
     class Meta:
@@ -329,17 +329,36 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.instance:
+        if hasattr(self, "instance") and self.instance:
             self.Meta.model = type(self.instance)
-        # For Swagger schema generation, provide a default model if none is set
-        if self.Meta.model is None:
-            from apps.core.models import UserProfile
-
-            self.Meta.model = UserProfile
 
     def get_age(self, obj):
-        if obj.date_of_birth:
-            from apps.core.utils import calculate_age
+        if hasattr(obj, "date_of_birth") and obj.date_of_birth:
+            from datetime import date
 
-            return calculate_age(obj.date_of_birth)
-        return None
+            today = date.today()
+            born = obj.date_of_birth
+            return (
+                today.year
+                - born.year
+                - ((today.month, today.day) < (born.month, born.day))
+            )
+        return 0
+
+    def update(self, instance, validated_data):
+        # Extract nested user data
+        user_data = validated_data.pop("user", None)
+
+        # Update user fields if provided
+        if user_data:
+            user = instance.user
+            for attr, value in user_data.items():
+                setattr(user, attr, value)
+            user.save()
+
+        # Update profile fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        return instance

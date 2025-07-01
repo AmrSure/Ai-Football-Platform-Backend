@@ -43,6 +43,7 @@ class BaseUserSerializer(serializers.ModelSerializer):
     - Includes basic user fields
     - Adds computed full_name field
     - Sets appropriate read-only fields
+    - Handles email uniqueness validation
 
     Dependencies:
     - Django REST Framework's ModelSerializer
@@ -72,6 +73,29 @@ class BaseUserSerializer(serializers.ModelSerializer):
         Returns a trimmed string combining both names.
         """
         return f"{obj.first_name} {obj.last_name}".strip()
+
+    def validate_email(self, value):
+        """
+        Validate email uniqueness, but allow users to keep their current email.
+        """
+        # Get the current user from context
+        current_user = self.context.get("current_user")
+
+        # If we have a current user and this is an update
+        if current_user:
+            # If the email hasn't changed, return it as is
+            if value == current_user.email:
+                return value
+            # If it has changed, check that no other user has it
+            if User.objects.exclude(id=current_user.id).filter(email=value).exists():
+                raise serializers.ValidationError(
+                    "This email is already in use by another user."
+                )
+        # If this is a creation
+        else:
+            if User.objects.filter(email=value).exists():
+                raise serializers.ValidationError("This email is already in use.")
+        return value
 
 
 class DynamicFieldsModelSerializer(serializers.ModelSerializer):

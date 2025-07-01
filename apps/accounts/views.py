@@ -317,6 +317,12 @@ class ProfileView(generics.RetrieveUpdateAPIView):
     def get_serializer_class(self):
         return ProfileSerializer
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # Add current user to context for validation
+        context["current_user"] = self.request.user
+        return context
+
     @swagger_auto_schema(
         operation_summary="Get current user's profile",
         operation_description="Returns the profile data for the authenticated user",
@@ -338,6 +344,10 @@ class ProfileView(generics.RetrieveUpdateAPIView):
         },
     )
     def put(self, request, *args, **kwargs):
+        # If email is being updated to the same value, remove it from the request
+        if "user" in request.data and "email" in request.data["user"]:
+            if request.data["user"]["email"] == request.user.email:
+                request.data["user"].pop("email")
         return super().put(request, *args, **kwargs)
 
     @swagger_auto_schema(
@@ -350,6 +360,10 @@ class ProfileView(generics.RetrieveUpdateAPIView):
         },
     )
     def patch(self, request, *args, **kwargs):
+        # If email is being updated to the same value, remove it from the request
+        if "user" in request.data and "email" in request.data["user"]:
+            if request.data["user"]["email"] == request.user.email:
+                request.data["user"].pop("email")
         return super().patch(request, *args, **kwargs)
 
 
