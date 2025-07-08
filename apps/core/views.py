@@ -6,12 +6,17 @@ It provides consistent API behavior and utility functions for REST endpoints.
 
 import logging
 
-from django.db import transaction
+from django.contrib.auth import get_user_model
+from django.db import models, transaction
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 logger = logging.getLogger(__name__)
 
@@ -215,3 +220,199 @@ class AcademyScopedViewSet(BaseModelViewSet):
         elif hasattr(user, "profile") and hasattr(user.profile, "academy"):
             return queryset.filter(academy=user.profile.academy)
         return queryset.none()
+
+
+class DashboardStatsView(APIView):
+    """
+    Dashboard statistics endpoint that auto-detects user type and returns appropriate stats.
+
+    For system_admin:
+    - Returns system-wide statistics across all academies
+
+    For academy_admin:
+    - Returns statistics scoped to their specific academy
+
+    For coach:
+    - Returns statistics related to their teams, players, and matches
+    """
+
+    @swagger_auto_schema(
+        operation_summary="Get dashboard statistics",
+        operation_description="Returns dashboard statistics based on user type. System admins get system-wide stats, academy admins get academy-specific stats, coaches get their team-related stats.",
+        responses={
+            200: openapi.Response(
+                description="Dashboard statistics",
+                schema=openapi.Schema(
+                    type=openapi.TYPE_OBJECT,
+                    properties={
+                        "user_type": openapi.Schema(type=openapi.TYPE_STRING),
+                        "academies_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "coaches_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "players_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "parents_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "external_clients_count": openapi.Schema(
+                            type=openapi.TYPE_INTEGER
+                        ),
+                        "fields_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "bookings_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "teams_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "matches_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    },
+                ),
+            ),
+            401: "Unauthorized - authentication required",
+            403: "Forbidden - insufficient permissions",
+        },
+    )
+    def get(self, request):
+        """Get dashboard statistics based on user type."""
+        user = request.user
+        user_type = user.user_type
+
+        if user_type == "system_admin":
+            return self._get_system_admin_stats()
+        elif user_type == "academy_admin":
+            return self._get_academy_admin_stats(user)
+        elif user_type == "coach":
+            return self._get_coach_stats(user)
+        else:
+            return Response(
+                {
+                    "detail": "Dashboard stats are only available for system admins, academy admins, and coaches."
+                },
+                status=403,
+            )
+
+    def _get_system_admin_stats(self):
+        """Get system-wide statistics for system admins."""
+        from apps.academies.models import (
+            Academy,
+            CoachProfile,
+            ExternalClientProfile,
+            ParentProfile,
+            PlayerProfile,
+        )
+        from apps.bookings.models import Field, FieldBooking
+
+        # Get all active profiles
+        active_coaches = CoachProfile.objects.filter(is_active=True)
+        active_players = PlayerProfile.objects.filter(is_active=True)
+        active_parents = ParentProfile.objects.filter(is_active=True)
+        active_external_clients = ExternalClientProfile.objects.filter(is_active=True)
+        active_fields = Field.objects.filter(is_active=True)
+        active_bookings = FieldBooking.objects.filter(is_active=True)
+
+        stats = {
+            "user_type": "system_admin",
+            "academies_count": Academy.objects.filter(is_active=True).count(),
+            "coaches_count": active_coaches.count(),
+            "players_count": active_players.count(),
+            "parents_count": active_parents.count(),
+            "external_clients_count": active_external_clients.count(),
+            "fields_count": active_fields.count(),
+            "bookings_count": active_bookings.count(),
+        }
+
+        logger.info("Retrieved system-wide dashboard stats")
+        return Response(stats)
+
+    def _get_academy_admin_stats(self, user):
+        """Get academy-specific statistics for academy admins."""
+        from apps.academies.models import (
+            CoachProfile,
+            ExternalClientProfile,
+            ParentProfile,
+            PlayerProfile,
+        )
+        from apps.bookings.models import Field, FieldBooking
+
+        # Check if user has academy profile
+        if not hasattr(user, "profile") or not hasattr(user.profile, "academy"):
+            return Response(
+                {
+                    "detail": "Academy admin profile not found or not associated with an academy."
+                },
+                status=400,
+            )
+
+        academy = user.profile.academy
+        if not academy:
+            return Response(
+                {"detail": "Academy admin is not associated with any academy."},
+                status=400,
+            )
+
+        # Get academy-specific statistics
+        academy_coaches = CoachProfile.objects.filter(academy=academy, is_active=True)
+        academy_players = PlayerProfile.objects.filter(academy=academy, is_active=True)
+        academy_fields = Field.objects.filter(academy=academy, is_active=True)
+        academy_bookings = FieldBooking.objects.filter(
+            field__academy=academy, is_active=True
+        )
+
+        # Get parents count (related through players)
+        parent_ids = set()
+        for player in academy_players:
+            for parent in player.parents.filter(is_active=True):
+                parent_ids.add(parent.id)
+
+        # Get external clients who have booked fields at this academy
+        external_client_ids = set()
+        for booking in academy_bookings:
+            if booking.booked_by.user_type == "external_client":
+                external_client_ids.add(booking.booked_by.id)
+
+        stats = {
+            "user_type": "academy_admin",
+            "academy_id": academy.id,
+            "academy_name": academy.name,
+            "coaches_count": academy_coaches.count(),
+            "players_count": academy_players.count(),
+            "parents_count": len(parent_ids),
+            "external_clients_count": len(external_client_ids),
+            "fields_count": academy_fields.count(),
+            "bookings_count": academy_bookings.count(),
+        }
+
+        logger.info(
+            f"Retrieved academy dashboard stats for academy {academy.id} by user {user.email}"
+        )
+        return Response(stats)
+
+    def _get_coach_stats(self, user):
+        """Get team-related statistics for coaches."""
+        from apps.matches.models import Match
+        from apps.players.models import Team
+
+        # Check if user has coach profile
+        if not hasattr(user, "profile"):
+            return Response({"detail": "Coach profile not found."}, status=400)
+
+        coach_profile = user.profile
+
+        # Get teams coached by this coach
+        teams = Team.objects.filter(coach=coach_profile, is_active=True)
+
+        # Get all players from coach's teams
+        total_players = 0
+        for team in teams:
+            total_players += team.players.filter(is_active=True).count()
+
+        # Get matches where coach's teams are involved
+        matches = Match.objects.filter(is_active=True).filter(
+            models.Q(home_team__in=teams) | models.Q(away_team__in=teams)
+        )
+
+        stats = {
+            "user_type": "coach",
+            "academy_id": coach_profile.academy.id if coach_profile.academy else None,
+            "academy_name": coach_profile.academy.name
+            if coach_profile.academy
+            else None,
+            "teams_count": teams.count(),
+            "players_count": total_players,
+            "matches_count": matches.count(),
+        }
+
+        logger.info(f"Retrieved coach dashboard stats for coach {user.email}")
+        return Response(stats)

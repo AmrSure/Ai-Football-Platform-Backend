@@ -1,9 +1,11 @@
 """Core app URL Configuration."""
 
-# from django.urls import path
+from django.urls import path
+
+from . import views
 
 app_name = "core"
 
 urlpatterns = [
-    # Add URL patterns here
+    path("dashboardstats/", views.DashboardStatsView.as_view(), name="dashboard-stats"),
 ]
