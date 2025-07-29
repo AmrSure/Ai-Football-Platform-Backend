@@ -445,6 +445,12 @@ class TeamSerializer(BaseModelSerializer):
         source="coach.user.get_full_name", read_only=True
     )
     players_count = serializers.SerializerMethodField()
+    players = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=PlayerProfile.objects.all(),
+        required=False,
+        help_text="List of player profile IDs to associate with this team",
+    )
 
     class Meta:
         model = Team
@@ -457,6 +463,7 @@ class TeamSerializer(BaseModelSerializer):
             "coach_name",
             "age_group",
             "formation",
+            "players",
             "players_count",
             "is_active",
             "created_at",
@@ -468,11 +475,58 @@ class TeamSerializer(BaseModelSerializer):
         """Get count of active players in this team."""
         return obj.players.filter(is_active=True).count()
 
+    def validate_players(self, value):
+        """Validate that all provided players belong to the same academy as the team."""
+        if value:
+            # Get the team's academy from the context or instance
+            team_academy = None
+            if self.instance:
+                team_academy = self.instance.academy
+            elif "academy" in self.initial_data:
+                from apps.academies.models import Academy
+
+                try:
+                    team_academy = Academy.objects.get(id=self.initial_data["academy"])
+                except Academy.DoesNotExist:
+                    pass
+
+            # Validate all players belong to the same academy
+            if team_academy:
+                for player in value:
+                    if player.academy != team_academy:
+                        raise serializers.ValidationError(
+                            f"Player {player.user.get_full_name()} does not belong to the academy {team_academy.name}"
+                        )
+
+        return value
+
+    def create(self, validated_data):
+        players = validated_data.pop("players", [])
+        instance = super().create(validated_data)
+
+        # Set players relationships
+        if players:
+            instance.players.set(players)
+
+        return instance
+
+    def update(self, instance, validated_data):
+        players = validated_data.pop("players", None)
+        instance = super().update(instance, validated_data)
+
+        # Update players relationships if provided
+        if players is not None:
+            instance.players.set(players)
+
+        return instance
+
 
 class TeamDetailSerializer(TeamSerializer):
     """Detailed serializer for Team model with nested players."""
 
-    players = PlayerProfileSerializer(many=True, read_only=True)
+    players_details = PlayerProfileSerializer(
+        source="players", many=True, read_only=True
+    )
 
     class Meta(TeamSerializer.Meta):
-        fields = TeamSerializer.Meta.fields + ["players"]
+        fields = TeamSerializer.Meta.fields + ["players_details"]
