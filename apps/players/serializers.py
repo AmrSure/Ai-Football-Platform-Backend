@@ -61,7 +61,13 @@ class PlayerProfileSerializer(BaseModelSerializer):
     user_email = serializers.CharField(source="user.email", read_only=True)
     user_name = serializers.CharField(source="user.get_full_name", read_only=True)
     academy_name = serializers.CharField(source="academy.name", read_only=True)
-    parents = serializers.SerializerMethodField()
+    parents = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=ParentProfile.objects.all(),
+        required=False,
+        help_text="List of parent profile IDs to associate with this player",
+    )
+    parents_details = serializers.SerializerMethodField()
 
     class Meta:
         model = PlayerProfile
@@ -80,13 +86,14 @@ class PlayerProfileSerializer(BaseModelSerializer):
             "dominant_foot",
             "bio",
             "parents",
+            "parents_details",
             "is_active",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
 
-    def get_parents(self, obj):
+    def get_parents_details(self, obj):
         """Get parent information for the player."""
         return [
             {
@@ -103,6 +110,37 @@ class PlayerProfileSerializer(BaseModelSerializer):
             for parent in obj.parents.filter(is_active=True)
         ]
 
+    def validate_parents(self, value):
+        """Validate that all provided parents belong to the same academy as the player's academy."""
+        if value:
+            # Get the player's academy from the context or instance
+            player_academy = None
+            if self.instance:
+                player_academy = self.instance.academy
+            elif "academy" in self.initial_data:
+                from apps.academies.models import Academy
+
+                try:
+                    player_academy = Academy.objects.get(
+                        id=self.initial_data["academy"]
+                    )
+                except Academy.DoesNotExist:
+                    pass
+
+            # Validate all parents belong to the same academy through their children
+            if player_academy:
+                for parent in value:
+                    # Check if parent has any children in the same academy
+                    children_in_academy = parent.children.filter(
+                        academy=player_academy, is_active=True
+                    )
+                    if not children_in_academy.exists():
+                        raise serializers.ValidationError(
+                            f"Parent {parent.user.get_full_name()} does not have any children in the academy {player_academy.name}"
+                        )
+
+        return value
+
     def validate(self, attrs):
         # If user data is provided, ensure user_type is 'player'
         user_data = attrs.get("user")
@@ -113,6 +151,7 @@ class PlayerProfileSerializer(BaseModelSerializer):
 
     def create(self, validated_data):
         user_data = validated_data.pop("user", None)
+        parents = validated_data.pop("parents", [])
 
         if user_data:
             # Create user with nested data
@@ -130,15 +169,27 @@ class PlayerProfileSerializer(BaseModelSerializer):
                     if key != "user":  # Don't overwrite user
                         setattr(existing_profile, key, value)
                 existing_profile.save()
+
+                # Set parents relationships
+                if parents:
+                    existing_profile.parents.set(parents)
+
                 return existing_profile
             except PlayerProfile.DoesNotExist:
                 # Profile doesn't exist, create new one
                 pass
 
-        return super().create(validated_data)
+        instance = super().create(validated_data)
+
+        # Set parents relationships
+        if parents:
+            instance.parents.set(parents)
+
+        return instance
 
     def update(self, instance, validated_data):
         user_data = validated_data.pop("user", None)
+        parents = validated_data.pop("parents", None)
 
         if user_data:
             # Update user data if provided
@@ -148,7 +199,13 @@ class PlayerProfileSerializer(BaseModelSerializer):
             user_serializer.is_valid(raise_exception=True)
             user_serializer.save()
 
-        return super().update(instance, validated_data)
+        instance = super().update(instance, validated_data)
+
+        # Update parents relationships if provided
+        if parents is not None:
+            instance.parents.set(parents)
+
+        return instance
 
 
 class CoachProfileSerializer(BaseModelSerializer):
