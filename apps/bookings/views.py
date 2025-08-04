@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 
 from django.db import transaction
 from django.db.models import Avg, Count, Q, Sum
+from django.utils import timezone
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import serializers, status, viewsets
@@ -613,7 +614,7 @@ class FieldViewSet(AcademyScopedViewSet):
         return Response(daily_schedule)
 
 
-class FieldBookingViewSet(AcademyScopedViewSet):
+class FieldBookingViewSet(BaseModelViewSet):
     """
     API endpoints for managing field bookings with atomic transaction support.
 
@@ -736,9 +737,9 @@ class FieldBookingViewSet(AcademyScopedViewSet):
                 "Field is currently not available for booking"
             )
 
-        booking = serializer.save(booked_by=self.request.user)
+        booking = serializer.save()
         logger.info(
-            f"Created booking {booking.id} for field {field.id} by user {self.request.user.id}"
+            f"Created booking {booking.id} for field {field.id} by user {self.request.user.id} for user {booking.booked_by.id}"
         )
 
         # Send email notifications
@@ -1099,7 +1100,7 @@ class FieldBookingViewSet(AcademyScopedViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if booking.start_time <= datetime.now():
+        if booking.start_time <= timezone.now():
             return Response(
                 {"error": "Cannot send reminder for past bookings"},
                 status=status.HTTP_400_BAD_REQUEST,

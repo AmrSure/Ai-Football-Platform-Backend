@@ -9,6 +9,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.academies.serializers import AcademySerializer
@@ -61,7 +62,7 @@ class FieldSerializer(serializers.ModelSerializer):
 
     def get_next_available_slot(self, obj):
         """Get the next available time slot for this field."""
-        now = datetime.now()
+        now = timezone.now()
         next_booking = (
             obj.bookings.filter(start_time__gt=now, status__in=["confirmed", "pending"])
             .order_by("start_time")
@@ -137,6 +138,28 @@ class FieldBookingSerializer(serializers.ModelSerializer):
             "can_modify",
         ]
 
+    def get_fields(self):
+        """
+        Make booked_by field writable for academy admins and system admins.
+        """
+        fields = super().get_fields()
+
+        # Check if user is academy admin or system admin
+        request = self.context.get("request")
+        if request and request.user:
+            user = request.user
+            if user.user_type in ["academy_admin", "system_admin"]:
+                # Remove booked_by from read_only_fields for admins
+                if "booked_by" in fields:
+                    fields["booked_by"].read_only = False
+                    fields["booked_by"].required = False  # Make it optional
+            else:
+                # For regular users, keep booked_by as read-only
+                if "booked_by" in fields:
+                    fields["booked_by"].read_only = True
+
+        return fields
+
     def get_duration_hours(self, obj):
         """Calculate booking duration in hours."""
         if obj.start_time and obj.end_time:
@@ -149,8 +172,8 @@ class FieldBookingSerializer(serializers.ModelSerializer):
         if obj.status in ["cancelled", "completed"]:
             return False
         # Can cancel up to 2 hours before start time
-        now = datetime.now()
-        if obj.start_time.replace(tzinfo=None) <= now + timedelta(hours=2):
+        now = timezone.now()
+        if obj.start_time <= now + timedelta(hours=2):
             return False
         return True
 
@@ -159,8 +182,8 @@ class FieldBookingSerializer(serializers.ModelSerializer):
         if obj.status in ["cancelled", "completed"]:
             return False
         # Can modify up to 4 hours before start time
-        now = datetime.now()
-        if obj.start_time.replace(tzinfo=None) <= now + timedelta(hours=4):
+        now = timezone.now()
+        if obj.start_time <= now + timedelta(hours=4):
             return False
         return True
 
@@ -171,6 +194,43 @@ class FieldBookingSerializer(serializers.ModelSerializer):
         field = data.get("field")
         start_time = data.get("start_time")
         end_time = data.get("end_time")
+        booked_by = data.get("booked_by")
+
+        # Validate booked_by field for admins
+        request = self.context.get("request")
+        if request and request.user:
+            user = request.user
+            if user.user_type in ["academy_admin", "system_admin"]:
+                # If booked_by is provided, validate it
+                if booked_by:
+                    # For academy admins, ensure the user belongs to their academy
+                    if user.user_type == "academy_admin":
+                        if hasattr(user, "profile") and hasattr(
+                            user.profile, "academy"
+                        ):
+                            user_academy = user.profile.academy
+                            # Check if the booked_by user belongs to the same academy
+                            if hasattr(booked_by, "profile") and hasattr(
+                                booked_by.profile, "academy"
+                            ):
+                                if booked_by.profile.academy != user_academy:
+                                    raise serializers.ValidationError(
+                                        "You can only create bookings for users in your academy."
+                                    )
+                            else:
+                                raise serializers.ValidationError(
+                                    "The specified user does not belong to any academy."
+                                )
+                        else:
+                            raise serializers.ValidationError(
+                                "You are not associated with any academy."
+                            )
+            else:
+                # For regular users, ensure they can only book for themselves
+                if booked_by and booked_by != user:
+                    raise serializers.ValidationError(
+                        "You can only create bookings for yourself."
+                    )
 
         # Basic time validation
         if start_time and end_time:
@@ -189,13 +249,13 @@ class FieldBookingSerializer(serializers.ModelSerializer):
                 )
 
             # Check if booking is in the future
-            if start_time <= datetime.now():
+            if start_time <= timezone.now():
                 raise serializers.ValidationError(
                     "Booking start time must be in the future."
                 )
 
             # Check if booking is within reasonable future (3 months)
-            if start_time > datetime.now() + timedelta(days=90):
+            if start_time > timezone.now() + timedelta(days=90):
                 raise serializers.ValidationError(
                     "Bookings can only be made up to 3 months in advance."
                 )
@@ -254,12 +314,29 @@ class FieldBookingSerializer(serializers.ModelSerializer):
         start_time = validated_data["start_time"]
         end_time = validated_data["end_time"]
 
+        # Get the user who should be booked_by
+        request = self.context.get("request")
+        if request and request.user:
+            user = request.user
+            # If booked_by is provided and user is admin, use it
+            if (
+                user.user_type in ["academy_admin", "system_admin"]
+                and "booked_by" in validated_data
+            ):
+                booked_by = validated_data["booked_by"]
+            else:
+                # Otherwise, use the requesting user
+                booked_by = user
+        else:
+            booked_by = validated_data.get("booked_by")
+
         # Calculate duration and total cost
         duration = end_time - start_time
         hours = duration.total_seconds() / 3600
         total_cost = Decimal(str(hours)) * field.hourly_rate
 
         validated_data["total_cost"] = total_cost
+        validated_data["booked_by"] = booked_by
 
         return super().create(validated_data)
 

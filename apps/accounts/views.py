@@ -513,7 +513,7 @@ class UserViewSet(BaseModelViewSet):
 
     def get_permissions(self):
         # Only system admins can access this viewset
-        self.permission_classes = [IsSystemAdmin]
+        self.permission_classes = [IsAcademyAdmin]
         return super().get_permissions()
 
     @swagger_auto_schema(
