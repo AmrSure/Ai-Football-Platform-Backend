@@ -6,7 +6,7 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV DJANGO_SETTINGS_MODULE=config.settings.production_standalone
+ENV DJANGO_SETTINGS_MODULE=config.settings.production_deploy
 
 # Install system dependencies
 RUN apt-get update \

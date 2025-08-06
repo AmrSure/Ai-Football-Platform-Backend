@@ -39,7 +39,7 @@ services:
     container_name: football_platform_web
     restart: unless-stopped
     environment:
-      - DJANGO_SETTINGS_MODULE=config.settings.production_standalone
+      - DJANGO_SETTINGS_MODULE=config.settings.production_deploy
       - SECRET_KEY=${SECRET_KEY}
       - DEBUG=${DEBUG:-False}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS}
@@ -69,8 +69,8 @@ services:
     networks:
       - football_platform_network
     command: >
-      sh -c "python manage.py migrate --settings=config.settings.production_standalone &&
-             python manage.py collectstatic --noinput --settings=config.settings.production_standalone &&
+      sh -c "python manage.py migrate --settings=config.settings.production_deploy &&
+             python manage.py collectstatic --noinput --settings=config.settings.production_deploy &&
              gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 30"
 
   # Celery Worker
@@ -81,7 +81,7 @@ services:
     container_name: football_platform_celery
     restart: unless-stopped
     environment:
-      - DJANGO_SETTINGS_MODULE=config.settings.production_standalone
+      - DJANGO_SETTINGS_MODULE=config.settings.production_deploy
       - SECRET_KEY=${SECRET_KEY}
       - DEBUG=${DEBUG:-False}
       - DB_NAME=${DB_NAME:-football_platform}
@@ -109,7 +109,7 @@ services:
     container_name: football_platform_celery_beat
     restart: unless-stopped
     environment:
-      - DJANGO_SETTINGS_MODULE=config.settings.production_standalone
+      - DJANGO_SETTINGS_MODULE=config.settings.production_deploy
       - SECRET_KEY=${SECRET_KEY}
       - DEBUG=${DEBUG:-False}
       - DB_NAME=${DB_NAME:-football_platform}
