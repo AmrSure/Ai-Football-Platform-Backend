@@ -57,15 +57,15 @@ python manage.py check --settings=config.settings.production --database default 
 
 # Run database migrations
 print_status "Running database migrations..."
-python manage.py migrate --settings=config.settings.production
+python manage.py migrate --settings=config.settings.production_standalone
 
 # Collect static files
 print_status "Collecting static files..."
-python manage.py collectstatic --noinput --settings=config.settings.production
+python manage.py collectstatic --noinput --settings=config.settings.production_standalone
 
 # Create superuser if it doesn't exist
 print_status "Checking for superuser..."
-if ! python manage.py shell --settings=config.settings.production -c "
+if ! python manage.py shell --settings=config.settings.production_standalone -c "
 from django.contrib.auth import get_user_model
 User = get_user_model()
 if not User.objects.filter(is_superuser=True).exists():
@@ -76,14 +76,14 @@ else:
     exit(0)
 " 2>/dev/null; then
     print_warning "No superuser found. Creating one..."
-    python manage.py createsuperuser --settings=config.settings.production --noinput || true
+    python manage.py createsuperuser --settings=config.settings.production_standalone --noinput || true
 else
     print_success "Superuser already exists"
 fi
 
 # Create system admin user if it doesn't exist
 print_status "Checking for system admin user..."
-if ! python manage.py shell --settings=config.settings.production -c "
+if ! python manage.py shell --settings=config.settings.production_standalone -c "
 from apps.core.models import User
 if not User.objects.filter(user_type='system_admin').exists():
     print('No system admin found')
@@ -93,7 +93,7 @@ else:
     exit(0)
 " 2>/dev/null; then
     print_warning "No system admin user found. Creating one..."
-    python manage.py shell --settings=config.settings.production -c "
+    python manage.py shell --settings=config.settings.production_standalone -c "
 from apps.core.models import User
 from apps.academies.models import Academy, AcademyAdminProfile
 
@@ -133,15 +133,15 @@ fi
 
 # Validate Django configuration
 print_status "Validating Django configuration..."
-python manage.py check --settings=config.settings.production --deploy
+python manage.py check --settings=config.settings.production_standalone --deploy
 
 # Test database connection
 print_status "Testing database connection..."
-python manage.py dbshell --settings=config.settings.production -c "SELECT 1;" > /dev/null 2>&1
+python manage.py dbshell --settings=config.settings.production_standalone -c "SELECT 1;" > /dev/null 2>&1
 
 # Create initial data if needed
 print_status "Creating initial data..."
-python manage.py shell --settings=config.settings.production -c "
+python manage.py shell --settings=config.settings.production_standalone -c "
 from apps.bookings.models import Field
 from apps.academies.models import Academy
 

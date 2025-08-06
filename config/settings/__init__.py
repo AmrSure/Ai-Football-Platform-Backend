@@ -4,7 +4,10 @@ import os
 # This allows importing directly from config.settings
 env = os.environ.get("DJANGO_ENV", "development")
 
-if env == "production":
+# Check if DJANGO_SETTINGS_MODULE is explicitly set to production
+if "production" in os.environ.get("DJANGO_SETTINGS_MODULE", ""):
+    from .production import *
+elif env == "production":
     from .production import *
 elif env == "staging":
     from .staging import *
