@@ -2,7 +2,7 @@
 # This file defines the processes that will be run by the platform
 
 # Web process - runs the Django application with Gunicorn
-web: gunicorn config.wsgi:application --config gunicorn.conf.py
+web: bash start.sh
 
 # Worker process - runs Celery for background tasks
 worker: celery -A config worker --loglevel=info
@@ -11,4 +11,4 @@ worker: celery -A config worker --loglevel=info
 beat: celery -A config beat --loglevel=info
 
 # Release process - runs migrations and setup tasks
-release: python manage.py migrate --settings=config.settings.production && python manage.py collectstatic --noinput --settings=config.settings.production
+release: bash deploy-cloud.sh

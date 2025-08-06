@@ -58,11 +58,8 @@ COPY . /app/
 RUN mkdir -p /app/logs /app/media /app/staticfiles \
     && chown -R appuser:appuser /app
 
-# Collect static files
-RUN python manage.py collectstatic --noinput --settings=config.settings.production
-
-# Change ownership of static files
-RUN chown -R appuser:appuser /app/staticfiles
+# Note: Static files will be collected at runtime, not during build
+# This avoids issues with missing environment variables during build
 
 # Switch to non-root user
 USER appuser
