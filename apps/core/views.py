@@ -234,11 +234,14 @@ class DashboardStatsView(APIView):
 
     For coach:
     - Returns statistics related to their teams, players, and matches
+
+    For external_client:
+    - Returns booking history and statistics for their bookings
     """
 
     @swagger_auto_schema(
         operation_summary="Get dashboard statistics",
-        operation_description="Returns dashboard statistics based on user type. System admins get system-wide stats, academy admins get academy-specific stats, coaches get their team-related stats.",
+        operation_description="Returns dashboard statistics based on user type. System admins get system-wide stats, academy admins get academy-specific stats, coaches get their team-related stats, external clients get their booking history and statistics.",
         responses={
             200: openapi.Response(
                 description="Dashboard statistics",
@@ -257,6 +260,19 @@ class DashboardStatsView(APIView):
                         "bookings_count": openapi.Schema(type=openapi.TYPE_INTEGER),
                         "teams_count": openapi.Schema(type=openapi.TYPE_INTEGER),
                         "matches_count": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "total_bookings": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "upcoming_bookings": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "completed_bookings": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "cancelled_bookings": openapi.Schema(type=openapi.TYPE_INTEGER),
+                        "total_spent": openapi.Schema(type=openapi.TYPE_STRING),
+                        "favorite_academies": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                        ),
+                        "recent_bookings": openapi.Schema(
+                            type=openapi.TYPE_ARRAY,
+                            items=openapi.Schema(type=openapi.TYPE_OBJECT),
+                        ),
                     },
                 ),
             ),
@@ -275,10 +291,12 @@ class DashboardStatsView(APIView):
             return self._get_academy_admin_stats(user)
         elif user_type == "coach":
             return self._get_coach_stats(user)
+        elif user_type == "external_client":
+            return self._get_external_client_stats(user)
         else:
             return Response(
                 {
-                    "detail": "Dashboard stats are only available for system admins, academy admins, and coaches."
+                    "detail": "Dashboard stats are only available for system admins, academy admins, coaches, and external clients."
                 },
                 status=403,
             )
@@ -415,4 +433,110 @@ class DashboardStatsView(APIView):
         }
 
         logger.info(f"Retrieved coach dashboard stats for coach {user.email}")
+        return Response(stats)
+
+    def _get_external_client_stats(self, user):
+        """Get booking history and statistics for external clients."""
+        from decimal import Decimal
+
+        from django.utils import timezone
+
+        from apps.bookings.models import FieldBooking
+
+        # Get all bookings for this external client
+        all_bookings = FieldBooking.objects.filter(
+            booked_by=user, is_active=True
+        ).select_related("field", "field__academy")
+
+        # Calculate booking statistics
+        total_bookings = all_bookings.count()
+
+        # Get current time for filtering
+        now = timezone.now()
+
+        # Upcoming bookings (future bookings)
+        upcoming_bookings = all_bookings.filter(
+            start_time__gt=now, status__in=["pending", "confirmed"]
+        ).count()
+
+        # Completed bookings (past bookings with completed status)
+        completed_bookings = all_bookings.filter(status="completed").count()
+
+        # Cancelled bookings
+        cancelled_bookings = all_bookings.filter(status="cancelled").count()
+
+        # Calculate total amount spent
+        total_spent = all_bookings.filter(
+            status__in=["confirmed", "completed"]
+        ).aggregate(total=models.Sum("total_cost"))["total"] or Decimal("0.00")
+
+        # Get favorite academies (academies with most bookings)
+        academy_booking_counts = {}
+        for booking in all_bookings:
+            academy_name = booking.field.academy.name
+            academy_booking_counts[academy_name] = (
+                academy_booking_counts.get(academy_name, 0) + 1
+            )
+
+        # Sort academies by booking count and get top 3
+        favorite_academies = sorted(
+            academy_booking_counts.items(), key=lambda x: x[1], reverse=True
+        )[:3]
+
+        favorite_academies_list = [
+            {"academy_name": academy_name, "bookings_count": count}
+            for academy_name, count in favorite_academies
+        ]
+
+        # Get recent bookings (last 5 bookings)
+        recent_bookings = all_bookings.order_by("-created_at")[:5]
+        recent_bookings_list = []
+
+        for booking in recent_bookings:
+            recent_bookings_list.append(
+                {
+                    "id": booking.id,
+                    "field_name": booking.field.name,
+                    "academy_name": booking.field.academy.name,
+                    "start_time": booking.start_time.isoformat(),
+                    "end_time": booking.end_time.isoformat(),
+                    "status": booking.status,
+                    "total_cost": str(booking.total_cost),
+                    "created_at": booking.created_at.isoformat(),
+                }
+            )
+
+        # Get booking status distribution
+        status_distribution = {}
+        for booking in all_bookings:
+            status = booking.status
+            status_distribution[status] = status_distribution.get(status, 0) + 1
+
+        stats = {
+            "user_type": "external_client",
+            "user_id": user.id,
+            "user_email": user.email,
+            "user_name": user.get_full_name(),
+            "total_bookings": total_bookings,
+            "upcoming_bookings": upcoming_bookings,
+            "completed_bookings": completed_bookings,
+            "cancelled_bookings": cancelled_bookings,
+            "pending_bookings": status_distribution.get("pending", 0),
+            "confirmed_bookings": status_distribution.get("confirmed", 0),
+            "total_spent": str(total_spent),
+            "average_booking_cost": str(
+                total_spent / total_bookings if total_bookings > 0 else Decimal("0.00")
+            ),
+            "favorite_academies": favorite_academies_list,
+            "recent_bookings": recent_bookings_list,
+            "booking_status_distribution": status_distribution,
+            "member_since": user.date_joined.isoformat(),
+            "last_booking_date": all_bookings.order_by("-created_at")
+            .first()
+            .created_at.isoformat()
+            if all_bookings.exists()
+            else None,
+        }
+
+        logger.info(f"Retrieved external client dashboard stats for user {user.email}")
         return Response(stats)
