@@ -6,9 +6,9 @@ env = os.environ.get("DJANGO_ENV", "development")
 
 # Check if DJANGO_SETTINGS_MODULE is explicitly set to production
 if "production" in os.environ.get("DJANGO_SETTINGS_MODULE", ""):
-    from .production import *
+    from .production_standalone import *
 elif env == "production":
-    from .production import *
+    from .production_standalone import *
 elif env == "staging":
     from .staging import *
 else:

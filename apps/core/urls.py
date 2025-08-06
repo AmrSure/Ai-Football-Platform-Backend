@@ -8,4 +8,5 @@ app_name = "core"
 
 urlpatterns = [
     path("dashboardstats/", views.DashboardStatsView.as_view(), name="dashboard-stats"),
+    path("health/", views.health_check, name="health-check"),
 ]

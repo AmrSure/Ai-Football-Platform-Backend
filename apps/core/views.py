@@ -8,13 +8,14 @@ import logging
 
 from django.contrib.auth import get_user_model
 from django.db import models, transaction
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.filters import OrderingFilter, SearchFilter
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -540,3 +541,20 @@ class DashboardStatsView(APIView):
 
         logger.info(f"Retrieved external client dashboard stats for user {user.email}")
         return Response(stats)
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def health_check(request):
+    """
+    Simple health check endpoint for Docker and load balancers.
+    Returns 200 OK if the application is running.
+    """
+    return Response(
+        {
+            "status": "healthy",
+            "message": "AI Football Platform is running",
+            "timestamp": timezone.now().isoformat(),
+        },
+        status=status.HTTP_200_OK,
+    )
