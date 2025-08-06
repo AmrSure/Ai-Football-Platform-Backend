@@ -58,6 +58,21 @@ class FieldViewSet(AcademyScopedViewSet):
     filterset_fields = ["field_type", "is_available", "is_active", "academy"]
     ordering = ["name"]
 
+    def get_queryset(self):
+        """
+        Override to handle external client access to all fields.
+        External clients should see all available fields across all academies.
+        """
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        # External clients can see all fields
+        if user.user_type == "external_client":
+            return Field.objects.all()
+
+        # For other users, use the default AcademyScopedViewSet behavior
+        return queryset
+
     def get_permissions(self):
         """
         Academy admins can manage fields in their academy.
