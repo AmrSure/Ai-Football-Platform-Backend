@@ -513,8 +513,15 @@ class UserViewSet(BaseModelViewSet):
 
     def get_permissions(self):
         # Only system admins can access this viewset
-        self.permission_classes = [IsAcademyAdmin]
+        self.permission_classes = [IsSystemAdmin]
         return super().get_permissions()
+
+    def get_queryset(self):
+        """
+        Return queryset with optimized database queries.
+        Includes all necessary fields for the list view.
+        """
+        return User.objects.all().select_related("profile")
 
     @swagger_auto_schema(
         operation_summary="List all users",
